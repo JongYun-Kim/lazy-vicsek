@@ -1,3 +1,5 @@
+import numpy as np
+
 def wrap_to_pi(angles):
     """
     Wraps *angles* to **[-pi, pi]**
