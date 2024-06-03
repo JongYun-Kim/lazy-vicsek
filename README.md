@@ -7,14 +7,13 @@
 
 ## TODOs
 - [x] ~~Open repository~~
-- [ ] Make directories
-  - [ ] ./envs
-  - [ ] ./model
-  - [ ] ./utils
-  - [ ] ./data
-  - [ ] ./evaluation
-  - [ ] ./experiments
-- [ ] Create an environment file
+- [x] ~~Make directories~~
+  - [x] ~~./env~~
+  - [x] ~~./model
+  - [x] ~~./utils~~
+  - [x] ~~./data~~
+  - [x] ~~./experiments~~
+- [x] Create an environment file
   - Less abstractions but quicker! just like before
   - But how are you going to deal with Laziest models (i.e. both lazy listenr and controller) ???
     - idk...
@@ -35,4 +34,10 @@
 ## Assumptions
 - Centrazlied training (decentrzlied excuteable tho)
 - No noise in training phase
-- asdf
+  - Training with noise is out of the scope of this project 
+- Communications: Fully connected
+  - Plan to test out partially connected communication setting for scalability and real-world applicability
+
+
+## Communication Checks
+- Don't yak, my yam!
