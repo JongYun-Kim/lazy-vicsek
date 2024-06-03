@@ -6,7 +6,7 @@
 ```
 
 ## TODOs
-- [ ] Open repository
+- [x] ~~Open repository~~
 - [ ] Make directories
   - [ ] ./envs
   - [ ] ./model
