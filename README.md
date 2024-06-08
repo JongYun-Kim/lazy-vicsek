@@ -32,7 +32,7 @@
 
 
 ## Assumptions
-- Centrazlied training (decentrzlied excuteable tho)
+- Centralized training (decentralized executable tho)
 - No noise in training phase
   - Training with noise is out of the scope of this project 
 - Communications: Fully connected
