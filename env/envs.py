@@ -1,10 +1,10 @@
 import os
+from copy import deepcopy
 import warnings
 import gym  # gym 0.23.1
 from gym.utils import seeding
 from gym.spaces import Box, Discrete, Dict, MultiDiscrete, MultiBinary
-from copy import deepcopy
-import numpy as np
+import numpy as np  # numpy 1.23.4
 # import matplotlib
 # import matplotlib.pyplot as plt
 from ray.rllib.utils.typing import (
@@ -340,8 +340,9 @@ class LazyVicsekEnv(gym.Env):
         rel_state = self.rel_state  # did NOT consider the communication network, DELIBERATELY
 
         # Interpret the action (i.e. model output)
-        action_interpreted = self.interpret_action(model_output=action)  # TODO: consider radius action type, *L8R*
-        joint_action = self.multi_to_single(action_interpreted) if self.config.env.env_mode == "multi_env" else action_interpreted
+        action_interpreted = self.interpret_action(model_output=action)
+        joint_action = self.multi_to_single(action_interpreted) if self.config.env.env_mode == "multi_env" \
+            else action_interpreted
         joint_action = self.to_binary_action(joint_action)  # (num_agents_max, num_agents_max)
         self.validate_action(action=joint_action,
                              neighbor_masks=state["neighbor_masks"], padding_mask=state["padding_mask"])
@@ -436,12 +437,11 @@ class LazyVicsekEnv(gym.Env):
         :return: None
         """
         # Check the dtype and shape of the action
-        if self.config.env.action_type == "binary_vector":  # TODO 땜빵
-            if action.dtype == np.int64:
-                self.action_dtype = np.int64
-        assert action.dtype == self.action_dtype, "action must be a(an) {} ndarray".format(self.action_dtype)
-        assert action.shape == (self.num_agents_max, self.num_agents_max), \
-            "action must be a boolean ndarray of shape (num_agents_max, num_agents_max)"
+        if self.config.env.action_type == "binary_vector":
+            assert isinstance(action, np.ndarray), "action must be a numpy ndarray"
+            assert np.issubdtype(action.dtype, np.integer), "action must be a numpy integer type"
+            assert action.shape == (self.num_agents_max, self.num_agents_max), \
+                "action must be a ndarray of shape (num_agents_max, num_agents_max)"
 
         # Ensure the diagonal elements are all ones (all with self-loops); if not, set them to ones
         if not np.all(np.diag(action) == 1):
@@ -476,7 +476,7 @@ class LazyVicsekEnv(gym.Env):
                 self.state["padding_mask"], np.newaxis]  # (num_agents, 1)
             action_in_binary = self.compute_neighbor_agents(
                 agent_states=self.state["agent_states"], padding_mask=self.state["padding_mask"],
-                communication_range=agent_wise_comm_range)[0]  # TODO: Check loss of communication
+                communication_range=agent_wise_comm_range)[0]
             return action_in_binary  # (num_agents_max, num_agents_max)
         elif self.config.env.action_type == "continuous_vector":
             raise NotImplementedError("continuous_vector action_type is not implemented yet")
@@ -511,13 +511,14 @@ class LazyVicsekEnv(gym.Env):
 
         return variable_in_multi
 
-    def env_transition(self, state, rel_state, action):
+    def env_transition(self, state, rel_state, action, action_lazy_control=None):
         """
         Transition the environment; all args in single-rl-agent settings
         s` = T(s, a); deterministic
         :param state: dict:
         :param rel_state: dict:
         :param action: ndarray of shape (num_agents_max, num_agents_max)
+        :param action_lazy_control: ndarray of shape (num_agents_max, )
         :return: next_state: dict; control_inputs: (num_agents_max, )
         """
         # Validate the laziness_vectors
@@ -527,12 +528,15 @@ class LazyVicsekEnv(gym.Env):
         lazy_listening_msg_masks = np.logical_and(state["neighbor_masks"], action)  # (num_agents_max, num_agents_max)
 
         # 1. Get control inputs based on the flocking control algorithm with the lazy listener's network
-        control_inputs = self.get_control_inputs(state, rel_state, lazy_listening_msg_masks)  # (num_agents_max, )
+        control_inputs = self.get_vicsek_control(state, rel_state, lazy_listening_msg_masks)  # (num_agents_max, )
 
-        # 2. Update the agent states based on the control inputs
+        # # 2. Apply lazy control actions: alters the control_inputs!
+        # control_inputs = action_lazy_control * control_inputs if action_lazy_control is not None else control_inputs
+
+        # 3. Update the agent states based on the control inputs
         next_agent_states = self.update_agent_states(state=state, control_inputs=control_inputs)
 
-        # 3. Update network topology (i.e. neighbor_masks) based on the new agent states
+        # 4. Update network topology (i.e. neighbor_masks) based on the new agent states
         if self.config.env.comm_range is None:
             next_neighbor_masks = state["neighbor_masks"]
             comm_loss_agents = None
@@ -541,12 +545,12 @@ class LazyVicsekEnv(gym.Env):
                 agent_states=next_agent_states, padding_mask=state["padding_mask"],
                 communication_range=self.config.env.comm_range)
 
-        # 4. Update the active agents (i.e. padding_mask); you may lose or gain agents
+        # 5. Update the active agents (i.e. padding_mask); you may lose or gain agents
         # next_padding_mask = self.update_active_agents(
         #     agent_states=next_agent_states, padding_mask=state["padding_mask"], communication_range=self.comm_range)
         # self.num_agents = next_padding_mask.sum()  # update the number of agents
 
-        # 5. Update the state
+        # 6. Update the state
         next_state = {"agent_states": next_agent_states,
                       "neighbor_masks": next_neighbor_masks,
                       "padding_mask": state["padding_mask"]
@@ -554,10 +558,55 @@ class LazyVicsekEnv(gym.Env):
 
         return next_state, control_inputs, comm_loss_agents
 
-    def get_control_inputs(self, state, rel_state, new_network):
+    def get_vicsek_control(self, state, rel_state, new_network):
         """
-        Get the control inputs based on the agent states
-        :return: control_inputs (num_agents_max)
+        Get the control inputs based on the agent states using the Vicsek Model
+        :return: u (num_agents_max)
+        """
+        # Please Work with Active Agents Only
+
+        # Get rel_pos, rel_dist, rel_vel, rel_ang, abs_ang, padding_mask, neighbor_masks
+        # rel_pos = rel_state["rel_agent_positions"]  # (num_agents_max, num_agents_max, 2)
+        # rel_dist = rel_state["rel_agent_dists"]  # (num_agents_max, num_agents_max)
+        # rel_vel = rel_state["rel_agent_velocities"]  # (num_agents_max, num_agents_max, 2)
+        rel_ang = rel_state["rel_agent_headings"]  # (num_agents_max, num_agents_max)
+        # abs_ang = state["agent_states"][:, 4]  # (num_agents_max, )
+        padding_mask = state["padding_mask"]  # (num_agents_max)
+        neighbor_masks = new_network  # (num_agents_max, num_agents_max)
+
+        # Get data of the active agents
+        active_agents_indices = np.nonzero(padding_mask)[0]  # (num_agents, )
+        active_agents_indices_2d = np.ix_(active_agents_indices, active_agents_indices)  # (num_agents,num_agents)
+        # p = rel_pos[active_agents_indices_2d]  # (num_agents, num_agents, 2)
+        # r = rel_dist[active_agents_indices_2d] + (
+        #             np.eye(self.num_agents) * np.finfo(float).eps)  # (num_agents, num_agents)
+        # v = rel_vel[active_agents_indices_2d]  # (num_agents, num_agents, 2)
+        th = rel_ang[active_agents_indices_2d]  # (num_agents, num_agents)
+        # th_i = abs_ang[padding_mask]  # (num_agents, )
+        net = neighbor_masks[active_agents_indices_2d]  # (num_agents, num_agents) may be no self-loops (i.e. 0 on diag)
+        n = (net + (np.eye(self.num_agents) * np.finfo(float).eps)).sum(axis=1)  # (num_agents, )
+
+        # Get control for Vicsek Model
+        relative_heading_network_filtered = th * net  # (num_agents, num_agents)
+        average_heading = relative_heading_network_filtered.sum(axis=1) / n  # (num_agents, )
+        average_heading_rate = average_heading / self.config.env.dt  # (num_agents, )
+
+        # Get control config
+        u_max = self.config.control.max_turn_rate
+
+        # 3. Saturation
+        u_active = np.clip(average_heading_rate, -u_max, u_max)  # (num_agents, )
+
+        # 4. Padding
+        u = np.zeros(self.num_agents_max, dtype=np.float32)  # (num_agents_max, )
+        u[padding_mask] = u_active  # (num_agents_max, )
+
+        return u
+
+    def get_acs_control(self, state, rel_state, new_network):
+        """
+        Get the control inputs based on the agent states using the Augmented Cucker-Smale Model
+        :return: u (num_agents_max)
         """
         # Please Work with Active Agents Only
 
@@ -758,6 +807,7 @@ class LazyVicsekEnv(gym.Env):
         :param control_inputs: (num_agents_max)
         :return: rewards: (num_agents_max)
         """
+        # TODO: Update this method according to Vicsek model
         rho = self.config.control.cost_weight
 
         # Heading rate control cost
@@ -931,13 +981,6 @@ class LazyVicsekEnv(gym.Env):
         """
         return NotImplemented
 
-    @staticmethod
-    def wrap_to_pi(angles):
-        """
-        Wraps *angles* to **[-pi, pi]**
-        """
-        return (angles + np.pi) % (2 * np.pi) - np.pi
-
     def render(self, mode='human'):
         """
         Render the environment
@@ -948,7 +991,19 @@ class LazyVicsekEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = LazyVicsekEnv('default_env_config.yaml')
+    my_seed_id = 0
+    env = LazyVicsekEnv(yaml_path='default_env_config.yaml', seed_id=my_seed_id)
     print(pretty_print(env.config.model_dump()))
     # env.get_default_config_dict()
+    print("Paused here for demonstration")
+
+    obs = env.reset()
+    num_agents_ = env.num_agents
+
+    # fully_connected_action = np.ones(shape=(n, n), dtype=np.int8)
+    individually_isolated_action = np.eye(num_agents_, dtype=np.int8)
+    for _ in range(3):
+        # obs, reward, done, info = env.step(fully_connected_action)
+        obs, reward, done, info = env.step(individually_isolated_action)
+
     print("Paused here for demonstration")
