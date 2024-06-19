@@ -17,9 +17,9 @@
   - Less abstractions but quicker! just like before
   - But how are you going to deal with Laziest models (i.e. both lazy listenr and controller) ???
     - idk...
-- [ ] Build model
-  - [ ] lazy listener
-  - [ ] lazy controller
+- [x] ~~Build model~~
+  - [x] ~~lazy listener~~
+  - [x] ~~lazy controller~~
 - [ ] Hyperparam tuning
 - [ ] Train and save the model
 - [ ] Evaluate the model

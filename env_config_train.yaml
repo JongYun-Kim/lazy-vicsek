@@ -7,7 +7,7 @@ control:
 #  bonding_strength: 1.0
 #  k1: 1.0
 #  k2: 3.0
-#  max_turn_rate: 1e6
+#  max_turn_rate: 1e3
 #  initial_position_bound: 250.0
 
 env:
@@ -26,6 +26,6 @@ env:
 #  std_v_rate_goal: 0.2
 #  alignment_goal: 0.96
 #  alignment_rate_goal: 0.1
-#  use_fixed_episode_length: false
+  use_fixed_episode_length: true
 #  get_state_hist: false
 #  get_action_hist: false

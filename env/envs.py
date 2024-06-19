@@ -18,7 +18,8 @@ from ray.rllib.utils.typing import (
 from ray.tune.logger import pretty_print
 from utils.my_utils_0 import wrap_to_pi
 from typing import List, Optional
-from pydantic import BaseModel, field_validator, model_validator, ConfigDict, conlist, conint, confloat
+# from pydantic import BaseModel, field_validator, model_validator, ConfigDict, conlist, conint, confloat  # v2
+from pydantic import BaseModel, Field, conlist, conint, validator, root_validator  # v1
 import yaml
 
 
@@ -31,7 +32,7 @@ class ControlConfig(BaseModel):
     bonding_strength: float = 1.0  # Bonding strength.
     k1: float = 1.0  # K1 coefficient.
     k2: float = 3.0  # K2 coefficient.
-    max_turn_rate: float = 8/15  # Maximum turn rate in rad/s.
+    max_turn_rate: float = 1e3  # Maximum turn rate in rad/s.
     initial_position_bound: float = 250.0  # Initial position bound in meters.
 
 
@@ -41,15 +42,18 @@ class LazyVicsekEnvConfig(BaseModel):
     agent_name_prefix: str = 'agent_'
     env_mode: str = 'single_env'
     action_type: str = 'binary_vector'
-    num_agents_pool: conlist(conint(ge=1), min_length=1)  # Must clarify it !!
+    # num_agents_pool: conlist(conint(ge=1), min_length=1)  # Must clarify it !!
+    num_agents_pool: List[conint(ge=1)]  # Must clarify it !!
     dt: float = 0.1
     comm_range: Optional[float] = None
-    max_time_steps: int = 1000
+    max_time_steps: int = 500
     # std_p_goal will be set dynamically
     std_p_goal: Optional[float] = None
     std_v_goal: float = 0.1
     std_p_rate_goal: float = 0.1
     std_v_rate_goal: float = 0.2
+    alignment_goal: float = 0.96
+    alignment_rate_goal: float = 0.04
     use_fixed_episode_length: bool = False
     get_state_hist: bool = False
     get_action_hist: bool = False
@@ -59,22 +63,30 @@ class Config(BaseModel):
     control: ControlConfig
     env: LazyVicsekEnvConfig
 
-    model_config = ConfigDict(extra='forbid')
+    # model_config = ConfigDict(extra='forbid')
 
-    @field_validator('control')
+    # @field_validator('control')
+    @validator('control')
     def validate_control(cls, v):
         # You can add validation logic for the ControlConfig here if needed
         return v
 
-    @field_validator('env')
+    # @field_validator('env')
+    @validator('env')
     def validate_env(cls, v):
         # You can add validation logic for the LazyVicsekEnvConfig here if needed
         return v
 
-    @model_validator(mode='after')
+    # @model_validator(mode='after')
+    @root_validator
     def set_dependent_defaults(cls, values):
-        if values.env.std_p_goal is None:
-            values.env.std_p_goal = 0.7 * values.control.predefined_distance
+        # if values.env.std_p_goal is None:
+        #     values.env.std_p_goal = 0.7 * values.control.predefined_distance
+        env_config = values.get('env')
+        control_config = values.get('control')
+        if env_config and control_config:
+            if env_config.std_p_goal is None:
+                env_config.std_p_goal = 0.7 * control_config.predefined_distance
         return values
 
 
@@ -85,15 +97,36 @@ def load_dict(path: str) -> dict:
     return config_dict
 
 
+def load_config(something):
+    if something is None:
+        print("Warning: No config is provided; using the default config.")
+        return Config(**load_dict('./env/default_env_config.yaml'))
+    elif isinstance(something, dict):
+        return Config(**something)
+    elif isinstance(something, str):
+        if os.path.exists(something):
+            return Config(**load_dict(something))
+        else:
+            raise FileNotFoundError(f"File not found: {something}")
+    elif isinstance(something, Config):
+        return something
+    else:
+        raise TypeError(f"Invalid type: {type(something)}")
+
+
+def config_to_env_input(config_instance: Config, seed_id: Optional[int] = None) -> dict:
+    return {"seed_id": seed_id, "config": config_instance.dict()}
+
+
 class LazyVicsekEnv(gym.Env):
     def __init__(self,
-                 yaml_path: str = './env/default_env_config.yaml',
-                 seed_id: Optional[int] = None,
+                 env_context: dict,
                  ):
         super().__init__()
+        seed_id = env_context['seed_id'] if 'seed_id' in env_context else None
         self.seed(seed_id)
 
-        self.config = Config(**load_dict(yaml_path))  # type-safer way!
+        self.config = load_config(env_context['config'])
 
         self.num_agents: Optional[int] = None  # defined in reset()
         self.num_agents_min: Optional[int] = None  # defined in _validate_config()
@@ -116,7 +149,8 @@ class LazyVicsekEnv(gym.Env):
         self.agent_states_hist, self.neighbor_masks_hist, self.action_hist = None, None, None
         # self.padding_mask_hist = None
         self.has_lost_comm = None
-        self.std_pos_hist, self.std_vel_hist = None, None
+        # self.std_pos_hist, self.std_vel_hist = None, None
+        self.alignment_hist = None
         self.time_step = None
         # self.agent_time_step = None
 
@@ -171,10 +205,10 @@ class LazyVicsekEnv(gym.Env):
         try:
             default_config = Config(**load_dict('./env/default_env_config.yaml'))
             print('-------------------DEFAULT CONFIG-------------------')
-            print(pretty_print(default_config.model_dump()))
+            print(pretty_print(default_config.dict()))
             # print(default_config.model_dump())
             print('----------------------------------------------------')
-            return deepcopy(default_config.model_dump())
+            return deepcopy(default_config.dict())
         except FileNotFoundError:
             warnings.warn("Warning: 'default_env_config.yaml' not found. Check the file path.")
             return None
@@ -216,7 +250,7 @@ class LazyVicsekEnv(gym.Env):
 
     def show_current_config(self):
         print('-------------------CURRENT CONFIG-------------------')
-        print(pretty_print(self.config.model_dump()))
+        print(pretty_print(self.config.dict()))
         # print(self.config.model_dump())
         print('----------------------------------------------------')
 
@@ -316,9 +350,12 @@ class LazyVicsekEnv(gym.Env):
         # Get obs
         obs = self.get_obs(state=self.state, rel_state=self.rel_state, control_inputs=np.zeros(self.num_agents_max))
 
-        # Std
-        self.std_pos_hist = np.zeros(self.config.env.max_time_steps)
-        self.std_vel_hist = np.zeros(self.config.env.max_time_steps)
+        # # Std
+        # self.std_pos_hist = np.zeros(self.config.env.max_time_steps)
+        # self.std_vel_hist = np.zeros(self.config.env.max_time_steps)
+
+        # Alignment
+        self.alignment_hist = np.zeros(self.config.env.max_time_steps)
 
         # Other settings
         if self.config.env.get_state_hist:
@@ -368,8 +405,9 @@ class LazyVicsekEnv(gym.Env):
 
         # Collect info
         info = {
-            "std_pos": self.std_pos_hist[self.time_step],
-            "std_vel": self.std_vel_hist[self.time_step],
+            # "std_pos": self.std_pos_hist[self.time_step],
+            # "std_vel": self.std_vel_hist[self.time_step],
+            "alignment": self.alignment_hist[self.time_step],
             "original_rewards": _reward,
             "comm_loss_agents": comm_loss_agents,
         }
@@ -585,11 +623,13 @@ class LazyVicsekEnv(gym.Env):
         # th_i = abs_ang[padding_mask]  # (num_agents, )
         net = neighbor_masks[active_agents_indices_2d]  # (num_agents, num_agents) may be no self-loops (i.e. 0 on diag)
         n = (net + (np.eye(self.num_agents) * np.finfo(float).eps)).sum(axis=1)  # (num_agents, )
+        # TODO: Do you need n?
 
         # Get control for Vicsek Model
         relative_heading_network_filtered = th * net  # (num_agents, num_agents)
         average_heading = relative_heading_network_filtered.sum(axis=1) / n  # (num_agents, )
         average_heading_rate = average_heading / self.config.env.dt  # (num_agents, )
+        # TODO: Does this avg_heading_rate really give the desired heading rate?
 
         # Get control config
         u_max = self.config.control.max_turn_rate
@@ -807,15 +847,13 @@ class LazyVicsekEnv(gym.Env):
         :param control_inputs: (num_agents_max)
         :return: rewards: (num_agents_max)
         """
-        # TODO: Update this method according to Vicsek model
-        rho = self.config.control.cost_weight
+        speed = self.config.control.speed
+        velocities = state["agent_states"][:, 2:4]  # (num_agents_max, 2)
+        average_velocity = np.mean(velocities, axis=0)  # (2, )
+        alignment = np.linalg.norm(average_velocity) / speed  # scalar in range [0, 1]
+        self.alignment_hist[self.time_step] = alignment
 
-        # Heading rate control cost
-        heading_rate_costs = (self.config.env.dt * self.config.control.speed) * np.abs(control_inputs)  # (num_a_max, )
-        # Cruising cost (time penalty)
-        cruising_costs = self.config.env.dt * np.ones(self.num_agents_max, dtype=np.float32)  # (num_agents_max, )
-
-        rewards = - (heading_rate_costs + (rho * cruising_costs))  # (num_agents_max, )
+        rewards = np.repeat(alignment, self.num_agents_max)  # (num_agents_max, )
         rewards[~state["padding_mask"]] = 0
 
         return rewards  # (num_agents_max, )
@@ -864,7 +902,6 @@ class LazyVicsekEnv(gym.Env):
              np.cos(active_th_transformed),                       # (num_agents, 1)
              np.sin(active_th_transformed),                       # (num_agents, 1)
              # control_inputs[active_agents_indices, np.newaxis]  # (num_agents, 1)
-             # TODO: what are you going to include in the obs??
              ],
             axis=1
         )  # (num_agents, obs_dim)
@@ -924,31 +961,40 @@ class LazyVicsekEnv(gym.Env):
         padding_mask = state["padding_mask"]
         done = False
 
+        if self.alignment_hist[self.time_step] > self.config.env.alignment_goal:
+            if not self.config.env.use_fixed_episode_length:
+                if self.time_step >= 49:
+                    last_n_alignments = self.alignment_hist[self.time_step - 49:self.time_step + 1]
+                    max_alignment = np.max(last_n_alignments)
+                    min_alignment = np.min(last_n_alignments)
+                    if max_alignment - min_alignment < self.config.env.alignment_rate_goal:
+                        done = True
+
         # Compute the current position and velocity std
-        agent_positions = state["agent_states"][:, :2][padding_mask]  # (num_agents, 2)
-        agent_velocities = state["agent_states"][:, 2:4][padding_mask]  # (num_agents, 2)
-        pos_std = np.sqrt(np.sum(np.var(agent_positions, axis=0)))  # scalar
-        vel_std = np.sqrt(np.sum(np.var(agent_velocities, axis=0)))  # scalar
-        self.std_pos_hist[self.time_step] = pos_std
-        self.std_vel_hist[self.time_step] = vel_std
+        # agent_positions = state["agent_states"][:, :2][padding_mask]  # (num_agents, 2)
+        # agent_velocities = state["agent_states"][:, 2:4][padding_mask]  # (num_agents, 2)
+        # pos_std = np.sqrt(np.sum(np.var(agent_positions, axis=0)))  # scalar
+        # vel_std = np.sqrt(np.sum(np.var(agent_velocities, axis=0)))  # scalar
+        # self.std_pos_hist[self.time_step] = pos_std
+        # self.std_vel_hist[self.time_step] = vel_std
 
         # Check (1) and (2)
-        is_pos_std_converged = pos_std < self.config.env.std_p_goal  # (1)
-        is_vel_std_converged = vel_std < self.config.env.std_v_goal  # (2)
-        are_stds_converged = is_pos_std_converged and is_vel_std_converged
+        # is_pos_std_converged = pos_std < self.config.env.std_p_goal  # (1)
+        # is_vel_std_converged = vel_std < self.config.env.std_v_goal  # (2)
+        # are_stds_converged = is_vel_std_converged  # and is_pos_std_converged
 
-        if are_stds_converged and not self.config.env.use_fixed_episode_length:
-            if self.time_step >= 49:  # magic number!!! (sigh)
-                # Check (3)
-                last_n_pos_stds = self.std_pos_hist[self.time_step - 49:self.time_step + 1]
-                max_pos_std = np.max(last_n_pos_stds)
-                min_pos_std = np.min(last_n_pos_stds)
-                if max_pos_std - min_pos_std < self.config.env.std_p_rate_goal:
-                    # Check (4)
-                    last_n_vel_stds = self.std_vel_hist[self.time_step - 49:self.time_step + 1]
-                    max_vel_std = np.max(last_n_vel_stds)
-                    min_vel_std = np.min(last_n_vel_stds)
-                    done = max_vel_std - min_vel_std < self.config.env.std_v_rate_goal
+        # if are_stds_converged and not self.config.env.use_fixed_episode_length:
+        #     if self.time_step >= 49:  # magic number!!! (sigh)
+        #         # Check (3)
+        #         last_n_pos_stds = self.std_pos_hist[self.time_step - 49:self.time_step + 1]
+        #         max_pos_std = np.max(last_n_pos_stds)
+        #         min_pos_std = np.min(last_n_pos_stds)
+        #         if max_pos_std - min_pos_std < self.config.env.std_p_rate_goal:
+        #             # Check (4)
+        #             last_n_vel_stds = self.std_vel_hist[self.time_step - 49:self.time_step + 1]
+        #             max_vel_std = np.max(last_n_vel_stds)
+        #             min_vel_std = np.min(last_n_vel_stds)
+        #             done = max_vel_std - min_vel_std < self.config.env.std_v_rate_goal
         # Check (5)
         if self.time_step >= self.config.env.max_time_steps - 1:
             done = True
@@ -993,7 +1039,7 @@ class LazyVicsekEnv(gym.Env):
 if __name__ == "__main__":
     my_seed_id = 0
     env = LazyVicsekEnv(yaml_path='default_env_config.yaml', seed_id=my_seed_id)
-    print(pretty_print(env.config.model_dump()))
+    print(pretty_print(env.config.dict()))
     # env.get_default_config_dict()
     print("Paused here for demonstration")
 
@@ -1004,6 +1050,6 @@ if __name__ == "__main__":
     individually_isolated_action = np.eye(num_agents_, dtype=np.int8)
     for _ in range(3):
         # obs, reward, done, info = env.step(fully_connected_action)
-        obs, reward, done, info = env.step(individually_isolated_action)
+        obs_, reward_, done_, info_ = env.step(individually_isolated_action)
 
     print("Paused here for demonstration")
