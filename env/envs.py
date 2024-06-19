@@ -321,7 +321,7 @@ class LazyVicsekEnv(gym.Env):
         # self.agent_time_step = np.zeros(self.num_agents_max, dtype=np.int32)
 
         # Get initial num_agents
-        self.num_agents = np.random.choice(self.num_agents_pool_np)  # randomly choose the num_agents
+        self.num_agents = self.np_random.choice(self.num_agents_pool_np)  # randomly choose the num_agents
         padding_mask = np.zeros(self.num_agents_max, dtype=np.bool_)  # (num_agents_max, )
         padding_mask[:self.num_agents] = True
 
@@ -329,9 +329,9 @@ class LazyVicsekEnv(gym.Env):
         # # Generate initial agent states
         p = np.zeros((self.num_agents_max, 2), dtype=np.float64)  # (num_agents_max, 2)
         l2 = self.config.control.initial_position_bound / 2
-        p[:self.num_agents, :] = np.random.uniform(-l2, l2, size=(self.num_agents, 2))
+        p[:self.num_agents, :] = self.np_random.uniform(-l2, l2, size=(self.num_agents, 2))
         th = np.zeros(self.num_agents_max, dtype=np.float64)  # (num_agents_max, )
-        th[:self.num_agents] = np.random.uniform(-np.pi, np.pi, size=(self.num_agents,))
+        th[:self.num_agents] = self.np_random.uniform(-np.pi, np.pi, size=(self.num_agents,))
         v = self.config.control.speed * np.stack([np.cos(th), np.sin(th)], axis=1)
         v[self.num_agents:] = 0
         # # Concatenate p v th
