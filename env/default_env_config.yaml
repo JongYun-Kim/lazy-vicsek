@@ -29,3 +29,4 @@ env:
 #  use_fixed_episode_length: false
 #  get_state_hist: false
 #  get_action_hist: false
+#  periodic_boundary: true  # Chech this!

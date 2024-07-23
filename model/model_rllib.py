@@ -27,11 +27,11 @@ class LazyListenerModelPPOTest(TorchModelV2, nn.Module):
 
         # Get actor
         # assert obs_space["centralized_agents_info"].shape[2] == 4, "d_subobs is not 4"
-        # self.actor = MJActorTest(obs_space["centralized_agents_info"].shape[2])
+        # self.actor = ActorTest(obs_space["centralized_agents_info"].shape[2])
         self.actor = ActorTest(4)
 
         # Get critic
-        # self.critic = MJCriticTest(obs_space["centralized_agents_info"].shape[2])
+        # self.critic = CriticTest(obs_space["centralized_agents_info"].shape[2])
         self.critic = CriticTest(4)
         self.values = None
 

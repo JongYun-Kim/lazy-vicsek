@@ -124,3 +124,93 @@ def batch_observations(
         return {SampleBatch.OBS: SampleBatch(batched_obs)}
     else:
         return batched_obs
+
+
+def wrap_to_rectangle(
+        p: np.ndarray,
+        width: float,
+        height: float,
+        center: np.ndarray = np.array([0.0, 0.0])
+) -> np.ndarray:
+    """
+    Wraps the given coordinates to a rectangle with the given width and height.
+    (x, y) goes within the rectangle area:
+      x-axis range: [-width/2 + cen[0], width/2 + cen[0]],
+      y-axis range: [-height/2 + cen[1], height/2 + cen[1]].
+    :param p: (np.ndarray) The coordinates to wrap. 2D array of (num_agents, 2).
+    :param width: (float) The width of the rectangle.
+    :param height: (float) The height of the rectangle.
+    :param center: (np.ndarray) The center of the rectangle.
+    :return:
+    """
+    half_dims = np.array([width / 2, height / 2])
+
+    # Translate points to the rectangle centered at the origin
+    p_centered = p - center
+
+    # Wrap coordinates within the rectangle dimensions
+    p_centered = (p_centered + half_dims) % np.array([width, height]) - half_dims
+
+    # Translate points back to the original center
+    p_wrapped = p_centered + center
+
+    return p_wrapped  # (num_agents, 2)
+
+
+def get_rel_pos_dist_in_periodic_boundary(rel_pos_normal, width, height):
+    """
+    Calculate the relative positions and distances considering periodic boundary conditions.
+
+    Parameters:
+    rel_pos_normal (np.ndarray): Relative positions with shape (num_agents, num_agents, 2).
+    width (float): The width of the boundary.
+    height (float): The height of the boundary.
+
+    Returns:
+    rel_pos_periodic (np.ndarray): Relative positions considering periodic boundaries with shape (num_agents, num_agents, 2).
+    rel_dist_periodic (np.ndarray): Relative distances considering periodic boundaries with shape (num_agents, num_agents).
+    """
+
+    # Apply periodic boundary conditions to the relative positions
+    rel_positions_x = rel_pos_normal[:, :, 0]
+    rel_positions_y = rel_pos_normal[:, :, 1]
+
+    wrapped_diff_x = np.where(np.abs(rel_positions_x) <= width / 2, rel_positions_x, -np.sign(rel_positions_x) * (width - np.abs(rel_positions_x)))
+    wrapped_diff_y = np.where(np.abs(rel_positions_y) <= height / 2, rel_positions_y, -np.sign(rel_positions_y) * (height - np.abs(rel_positions_y)))
+
+    # Combine the wrapped differences into relative positions
+    rel_pos_periodic = np.stack((wrapped_diff_x, wrapped_diff_y), axis=-1)  # (num_agents, num_agents, 2)
+
+    # Compute distances
+    rel_dist_periodic = np.linalg.norm(rel_pos_periodic, axis=2)  # (num_agents, num_agents)
+
+    return rel_pos_periodic, rel_dist_periodic
+
+
+def compute_neighbors(wrapped_positions, width, height, radius, self_loops=True):
+    """
+    Compute the neighbors of each agent considering periodic boundary conditions.
+
+    :param wrapped_positions: np.ndarray of shape (num_agents, 2) representing wrapped 2D positions of agents.
+    :param width: float representing the width of the rectangular area.
+    :param height: float representing the height of the rectangular area.
+    :param radius: float representing the neighborhood radius.
+    :param self_loops: bool indicating whether to consider self-loops.
+    :return: np.ndarray of shape (num_agents_max, num_agents_max) representing neighbors within the radius.
+    """
+
+    # Calculate distance differences with periodic boundary conditions
+    for dim in range(2):  # 0 for x, 1 for y
+        diff = np.abs(wrapped_positions[:, dim][:, np.newaxis] - wrapped_positions[:, dim][np.newaxis, :])  # (num_agents, num_agents)
+        diff = np.minimum(diff, width - diff) if dim == 0 else np.minimum(diff, height - diff)
+        if dim == 0:
+            dx = diff
+        else:
+            dy = diff
+
+    distances = np.sqrt(dx ** 2 + dy ** 2)
+    if not self_loops:
+        np.fill_diagonal(distances, np.inf)  # Ignore self distances by setting them to infinity
+    neighbors_array = distances <= radius
+
+    return neighbors_array  # (num_agents, num_agents)

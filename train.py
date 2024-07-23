@@ -18,7 +18,7 @@ if __name__ == "__main__":
     default_config_path = "D:/pych_ws/lazy-vicsek/env_config_train.yaml"
     my_config = load_config(default_config_path)
     my_config.env.num_agents_pool = [20]
-    my_config.env.max_time_steps = 500
+    my_config.env.max_time_steps = 100
     my_config.env.alignment_goal = 0.96
     my_config.env.alignment_rate_goal = 0.04
     my_config.env.use_fixed_episode_length = True
@@ -62,14 +62,14 @@ if __name__ == "__main__":
             },
             "num_gpus": 0.5,
             "num_workers": 14,
-            "num_envs_per_worker": 2,
+            "num_envs_per_worker": 3,
             "rollout_fragment_length": 500,
-            "train_batch_size": 14000,
+            "train_batch_size": 21000,
             "sgd_minibatch_size": 256,
-            "num_sgd_iter": 5,
+            "num_sgd_iter": 10,
             # "batch_mode": "complete_episodes",
             # "batch_mode": "truncate_episodes",
-            "lr": 3e-5,
+            "lr": 2e-5,
             # "lr_schedule": [[0, 2e-5],
             #                 [1e7, 1e-7],
             #                 ],

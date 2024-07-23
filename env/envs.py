@@ -16,7 +16,7 @@ from ray.rllib.utils.typing import (
     # MultiEnvDict,
 )
 from ray.tune.logger import pretty_print
-from utils.my_utils_0 import wrap_to_pi
+from utils.my_utils_0 import wrap_to_pi, wrap_to_rectangle, get_rel_pos_dist_in_periodic_boundary
 from typing import List, Optional
 # from pydantic import BaseModel, field_validator, model_validator, ConfigDict, conlist, conint, confloat  # v2
 from pydantic import BaseModel, Field, conlist, conint, validator, root_validator  # v1
@@ -57,11 +57,14 @@ class LazyVicsekEnvConfig(BaseModel):
     use_fixed_episode_length: bool = False
     get_state_hist: bool = False
     get_action_hist: bool = False
+    ignore_comm_lost_agents: bool = False
+    periodic_boundary: bool = True
 
 
 class Config(BaseModel):
     control: ControlConfig
     env: LazyVicsekEnvConfig
+    # nn: Optional[dict] = None  # Implement this later with a pydantic config class for the nn settings
 
     # model_config = ConfigDict(extra='forbid')
 
@@ -149,6 +152,7 @@ class LazyVicsekEnv(gym.Env):
         self.agent_states_hist, self.neighbor_masks_hist, self.action_hist = None, None, None
         # self.padding_mask_hist = None
         self.has_lost_comm = None
+        self.lost_comm_step = None
         # self.std_pos_hist, self.std_vel_hist = None, None
         self.alignment_hist = None
         self.time_step = None
@@ -369,10 +373,10 @@ class LazyVicsekEnv(gym.Env):
 
     def step(self, action):
         """
-                Step the environment
-                :param action: your_model_output; ndarray of shape (num_agents_max, num_agents_max) expected under the default
-                :return: obs, reward, done, info
-                """
+        Step the environment
+        :param action: your_model_output; ndarray of shape (num_agents_max, num_agents_max) expected under the default
+        :return: obs, reward, done, info
+        """
         state = self.state  # state of the class (flock);
         rel_state = self.rel_state  # did NOT consider the communication network, DELIBERATELY
 
@@ -437,8 +441,20 @@ class LazyVicsekEnv(gym.Env):
         padding_mask = state["padding_mask"]  # shape (num_agents_max)
 
         # Get relative positions and distances
-        rel_agent_positions, rel_agent_dists = self.get_relative_info(
-            data=agent_positions, mask=padding_mask, get_dist=True, get_active_only=False)
+        if self.config.env.periodic_boundary:
+            l = self.config.control.initial_position_bound
+            # Get relative positions in normal boundary
+            rel_agent_positions, _ = self.get_relative_info(
+                data=agent_positions, mask=padding_mask, get_dist=False, get_active_only=False)
+            # Transform the relative positions to the periodic boundary
+            rel_agent_positions, rel_agent_dists = get_rel_pos_dist_in_periodic_boundary(
+                rel_pos_normal=rel_agent_positions, width=l, height=l)
+            # Remove padding agents (make zero)
+            rel_agent_positions[~padding_mask, :, :][:, ~padding_mask, :] = 0  # (num_agents_max, num_agents_max, 2)
+            rel_agent_dists[~padding_mask, :][:, ~padding_mask] = 0  # (num_agents_max, num_agents_max)
+        else:
+            rel_agent_positions, rel_agent_dists = self.get_relative_info(
+                data=agent_positions, mask=padding_mask, get_dist=True, get_active_only=False)
 
         # Get relative velocities
         rel_agent_velocities, _ = self.get_relative_info(
@@ -749,6 +765,9 @@ class LazyVicsekEnv(gym.Env):
         # 0. <- 3. Positions
         next_agent_positions = (state["agent_states"][:, :2]
                                 + state["agent_states"][:, 2:4] * self.config.env.dt)  # (n_a_max, 2)
+        if self.config.env.periodic_boundary:
+            w = h = self.config.control.initial_position_bound
+            next_agent_positions = wrap_to_rectangle(next_agent_positions, w, h)
         # 1. Headings
         next_agent_headings = state["agent_states"][:, 4] + control_inputs * self.config.env.dt  # (num_agents_max, )
         # next_agent_headings = np.mod(next_agent_headings, 2 * np.pi)  # (num_agents_max, )
@@ -774,8 +793,23 @@ class LazyVicsekEnv(gym.Env):
         self_loop = includes_self_loops  # True if includes self-loops; False otherwise
         agent_positions = agent_states[:, :2]  # (num_agents_max, 2)
         # Get active relative distances
-        _, rel_dist = self.get_relative_info(  # (num_agents, num_agents)
-            data=agent_positions, mask=padding_mask, get_dist=True, get_active_only=True)
+        if self.config.env.periodic_boundary:
+            # rel_data_absolute, _ = np.abs(self.get_relative_info(data=agent_positions, mask=padding_mask,
+            #                                                      get_dist=False, get_active_only=True))
+            # # Apply periodic boundary conditions
+            # width, height = self.config.control.initial_position_bound, self.config.control.initial_position_bound
+            # wrapped_diff = np.minimum(rel_data_absolute, np.array([width, height]) - rel_data_absolute)
+            # # Compute distances
+            # rel_dist = np.linalg.norm(wrapped_diff, axis=2)  # (num_agents, num_agents)
+            #
+            rel_pos_normal, _ = self.get_relative_info(data=agent_positions, mask=padding_mask,
+                                                       get_dist=False, get_active_only=True)
+            width = height = self.config.control.initial_position_bound
+            _, rel_dist = get_rel_pos_dist_in_periodic_boundary(rel_pos_normal, width, height)
+        else:
+            _, rel_dist = self.get_relative_info(data=agent_positions, mask=padding_mask,
+                                                 get_dist=True, get_active_only=True)
+
         # Get active neighbor masks
         active_neighbor_masks = rel_dist <= communication_range  # (num_agents, num_agents)
         if not includes_self_loops:
@@ -787,10 +821,10 @@ class LazyVicsekEnv(gym.Env):
         next_neighbor_masks[np.ix_(active_agents_indices, active_agents_indices)] = active_neighbor_masks
 
         # Check no neighbor agents (be careful neighbor mask may not include self-loops)
-        neighbor_sum = next_neighbor_masks.sum(axis=1)  # (num_agents_max, )
-        if includes_self_loops:
-            neighbor_sum -= 1  # Subtract 1 for self-loop
-        comm_loss_agents = np.logical_and(padding_mask, neighbor_sum == 0)
+        neighbor_nums = next_neighbor_masks.sum(axis=1)  # (num_agents_max, )
+        if not includes_self_loops:
+            neighbor_nums += 1  # Add 1 for artificial self-loops
+        comm_loss_agents = np.logical_and(padding_mask, neighbor_nums == 1)  # is alone in the network?
 
         return next_neighbor_masks, comm_loss_agents  # (num_agents_max, num_agents_max), (num_agents_max)
 
@@ -1002,7 +1036,8 @@ class LazyVicsekEnv(gym.Env):
         # Check (6)
         if self.config.env.comm_range is not None:
             if comm_loss_agents.any():
-                done = True
+                done = False if self.config.env.ignore_comm_lost_agents else True
+                self.lost_comm_step = self.time_step if self.has_lost_comm is not None else self.lost_comm_step
                 self.has_lost_comm = True
 
         if self.config.env.env_mode == "single_env":

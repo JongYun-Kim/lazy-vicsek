@@ -89,7 +89,7 @@ class ActorTest(nn.Module):
         # Fill the diagonal with very large positive value (to make the corresponding probability close to 1)
         large_val = 1e9  # may cause NaN if it passes through softmax (or exp)
         # large_val = 512
-        att_scores *= 2e-3
+        att_scores *= 5e-3
         att_scores = att_scores - torch.diag_embed(att_scores.new_full((n_agent,), large_val))  # [batch_size, n_agent, n_agent]
 
         # large_val = 1e9
