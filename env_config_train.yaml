@@ -30,3 +30,4 @@ env:
 #  get_state_hist: false
 #  get_action_hist: false
   periodic_boundary: true
+  ignore_comm_lost_agents: true  # Check this!

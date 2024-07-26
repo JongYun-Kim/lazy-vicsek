@@ -187,6 +187,36 @@ def get_rel_pos_dist_in_periodic_boundary(rel_pos_normal, width, height):
     return rel_pos_periodic, rel_dist_periodic
 
 
+def map_periodic_to_continuous_space(coordinates, width, height, center=np.array([0, 0])):
+    """
+    Maps periodic coordinates [x, y] to continuous inputs using cosine and sine transformations.
+
+    Args:
+    coordinates (np.ndarray): A numpy array of shape (num_agents, num_agents, 2) containing [x, y] coordinates.
+    width (float): The width boundary for x coordinates.
+    height (float): The height boundary for y coordinates.
+    center (np.ndarray): A numpy array of shape (2,) representing the center [cx, cy] of the rectangular area.
+                         Defaults to the origin [0, 0].
+
+    Returns:
+    np.ndarray: Transformed positions with shape (num_agents, num_agents, 4) containing [x_cos, x_sin, y_cos, y_sin].
+    """
+    # Normalize the coordinates to the range [-1, 1]
+    normalized_positions = 2 * (coordinates - center) / np.array([width, height])
+
+    # Apply cosine and sine transformations
+    cos_positions = np.cos(np.pi * normalized_positions)
+    sin_positions = np.sin(np.pi * normalized_positions)
+
+    # Stack the transformed coordinates into a single array in the order [x_cos, x_sin, y_cos, y_sin]
+    transformed_positions = np.concatenate(
+        (cos_positions[..., 0:1], sin_positions[..., 0:1], cos_positions[..., 1:2], sin_positions[..., 1:2]),
+        axis=-1
+    )
+
+    return transformed_positions  # (num_agents, num_agents, 4)
+
+
 def compute_neighbors(wrapped_positions, width, height, radius, self_loops=True):
     """
     Compute the neighbors of each agent considering periodic boundary conditions.

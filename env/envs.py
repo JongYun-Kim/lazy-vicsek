@@ -16,7 +16,8 @@ from ray.rllib.utils.typing import (
     # MultiEnvDict,
 )
 from ray.tune.logger import pretty_print
-from utils.my_utils_0 import wrap_to_pi, wrap_to_rectangle, get_rel_pos_dist_in_periodic_boundary
+from utils.my_utils_0 import (wrap_to_pi, wrap_to_rectangle,
+                              get_rel_pos_dist_in_periodic_boundary, map_periodic_to_continuous_space)
 from typing import List, Optional
 # from pydantic import BaseModel, field_validator, model_validator, ConfigDict, conlist, conint, confloat  # v2
 from pydantic import BaseModel, Field, conlist, conint, validator, root_validator  # v1
@@ -38,7 +39,7 @@ class ControlConfig(BaseModel):
 
 class LazyVicsekEnvConfig(BaseModel):
     seed: Optional[int] = None
-    obs_dim: int = 4
+    obs_dim: int = 6
     agent_name_prefix: str = 'agent_'
     env_mode: str = 'single_env'
     action_type: str = 'binary_vector'
@@ -46,7 +47,7 @@ class LazyVicsekEnvConfig(BaseModel):
     num_agents_pool: List[conint(ge=1)]  # Must clarify it !!
     dt: float = 0.1
     comm_range: Optional[float] = None
-    max_time_steps: int = 500
+    max_time_steps: int = 200
     # std_p_goal will be set dynamically
     std_p_goal: Optional[float] = None
     std_v_goal: float = 0.1
@@ -895,81 +896,68 @@ class LazyVicsekEnv(gym.Env):
     def get_obs(self, state, rel_state, control_inputs):
         """
         Get the observation
-        i-th agent's observation: [x, y, vx, vy] with its neighbors' info (and padding info)
+        i-th agent's observation: [x, y, vx, vy] with its neighbors' info (and padding info) if necessary
+        If periodic boundary, the position will be transformed to sin-cos space
+          i.e. o_i := [cos(x), sin(x), cos(y), sin(y), vx, vy]
         :return: obs
         """
-        # This implements it based on Centralized Observations !!!
-
-        # Get masks
+        # (0) Get masks
         # # We assume that the neighbor_masks are up-to-date and include the paddings (0) and self-loops (1)
         neighbor_masks = state["neighbor_masks"]  # (num_agents_max, num_agents_max); self not included
         padding_mask = state["padding_mask"]
         active_agents_indices = np.nonzero(padding_mask)[0]  # (num_agents, )
-        # active_agents_indices_2d = np.ix_(active_agents_indices, active_agents_indices)
+        active_agents_indices_2d = np.ix_(active_agents_indices, active_agents_indices)
         # # Add self-loops only for the active agents
         # neighbor_masks_with_self_loops = neighbor_masks.copy()
         # neighbor_masks_with_self_loops[active_agents_indices_2d] = 1
 
-        # Get p and th  (active agents only)
-        active_agent_positions = state["agent_states"][:, :2][active_agents_indices]  # (num_agents, 2)
-        # velocities = state["agent_states"][:, 2:4]
-        active_agent_headings = state["agent_states"][:, 4][active_agents_indices, np.newaxis]  # (num_agents, 1)
-        active_agent_headings = wrap_to_pi(active_agent_headings)  # MUST be wrapped to [-pi, pi] before averaging
+        # (1) Get [x, y], [vx==cos(th), vy] in rel_state (active agents only)
+        active_agents_rel_positions = rel_state["rel_agent_positions"][active_agents_indices_2d]  # (n, n, 2)
+        active_agents_rel_headings = rel_state["rel_agent_headings"][active_agents_indices_2d]
+        # active_agents_rel_headings = wrap_to_pi(active_agents_rel_headings)  # MUST be wrapped to [-pi, pi]?
+        active_agents_rel_headings = active_agents_rel_headings[:, :, np.newaxis]  # (num_agents, num_agents, 1)
 
-        # Transform the pos and th into ones in translation-rotation-invariant space
-        # # Prepare for the translation and rotation to the swarm coordinate
-        center = np.mean(active_agent_positions, axis=0)  # (2, )
-        average_heading = np.mean(active_agent_headings)  # (,  ) scalar
-        rot_mat = np.array([[np.cos(average_heading), -np.sin(average_heading)],
-                            [np.sin(average_heading), np.cos(average_heading)]])  # (2, 2)
-        # # Transform p and th
-        active_p_transformed = active_agent_positions - center  # (num_agents, 2)  (making the avg pos the origin)
-        active_p_transformed = np.dot(active_p_transformed, rot_mat)  # (num_agents, 2)
-        # active_p_transformed = np.matmul(active_p_transformed, rot_mat)
-        active_th_transformed = active_agent_headings - average_heading  # (num_agents, 1)  (making the avg heading 0)
-        # active_th_transformed = self.wrap_to_pi(active_th_transformed)  # (num_agents, 1)
+        # (2) Map periodic to continuous space if necessary: [x, y] -> [cos(x), sin(x), cos(y), sin(y)]
+        l = self.config.control.initial_position_bound
+        if self.config.env.periodic_boundary:
+            # (num_agents, num_agents, 4)
+            active_agents_rel_positions = map_periodic_to_continuous_space(active_agents_rel_positions, l, l)
+        else:  # needs normalization
+            # (num_agents, num_agents, 2)
+            active_agents_rel_positions = active_agents_rel_positions / (l/2)
 
-        # # Concat p, |vx|, |vy|, control_inputs; and fill the padding with zeros
-        # # # Concat p, |vx|, |vy|, control_inputs
-        active_pvu = np.concatenate(
-            [active_p_transformed,                        # (num_agents, 2)
-             np.cos(active_th_transformed),                       # (num_agents, 1)
-             np.sin(active_th_transformed),                       # (num_agents, 1)
-             # control_inputs[active_agents_indices, np.newaxis]  # (num_agents, 1)
+        # (3) Concat all
+        active_agents_obs = np.concatenate(
+            [active_agents_rel_positions,    # (num_agents, num_agents, 4 or 2)
+             np.cos(active_agents_rel_headings),  # (num_agents, num_agents, 1)
+             np.sin(active_agents_rel_headings),  # (num_agents, num_agents, 1)
              ],
-            axis=1
-        )  # (num_agents, obs_dim)
-        # # # Fill the padding with zeros
-        agent_observations = np.zeros((self.num_agents_max, self.config.env.obs_dim), dtype=np.float32)
-        agent_observations[padding_mask] = active_pvu  # (num_agents_max, obs_dim)
-
-        # Normalize the agent_observations by [ init_bound/2, init_bound/2, 1, 1, u_max ]
-        init_bound = self.config.control.initial_position_bound
-        u_max = self.config.control.max_turn_rate
-        agent_observations[:, :2] /= (init_bound / 2)
-        # agent_observations[:, 4] /= u_max
+            axis=2
+        )  # (num_agents, num_agents, obs_dim)
+        agents_obs = np.zeros((self.num_agents_max, self.num_agents_max, self.config.env.obs_dim), dtype=np.float64)
+        agents_obs[active_agents_indices_2d] = active_agents_obs  # (num_agents_max, num_agents_max, obs_dim)
 
         # Construct observation
-        post_processed_obs = self.post_process_obs(agent_observations, neighbor_masks, padding_mask)
+        post_processed_obs = self.post_process_obs(agents_obs, neighbor_masks, padding_mask)
         # # In case of post-processing applied
         if post_processed_obs is not NotImplemented:
             return post_processed_obs
         # # In case of the base implementation (with no post-processing)
         if self.config.env.env_mode == "single_env":
-            obs = {"centralized_agents_info": agent_observations,  # (num_agents_max, obs_dim)
-                   "neighbor_masks": neighbor_masks,              # (num_agents_max, num_agents_max)
-                   "padding_mask": padding_mask,                  # (num_agents_max)
+            obs = {"centralized_agents_info": agents_obs,    # (num_agents_max, num_agents_max, obs_dim)
+                   "neighbor_masks": neighbor_masks,         # (num_agents_max, num_agents_max)
+                   "padding_mask": padding_mask,             # (num_agents_max)
                    }
             return obs
-        elif self.config.env.env_mode == "multi_env":
-            multi_obs = {}
-            for i in range(self.num_agents_max):
-                multi_obs[self.config.env.agent_name_prefix + str(i)] = {
-                    "centralized_agent_info": agent_observations[i],  # (obs_dim, )
-                    "neighbor_mask": neighbor_masks[i],  # (num_agents_max, )
-                    "padding_mask": padding_mask,      # (num_agents_max, )
-                }
-            return multi_obs
+        # elif self.config.env.env_mode == "multi_env":
+        #     multi_obs = {}
+        #     for i in range(self.num_agents_max):
+        #         multi_obs[self.config.env.agent_name_prefix + str(i)] = {
+        #             "centralized_agent_info": agent_observations[i],  # (obs_dim, )
+        #             "neighbor_mask": neighbor_masks[i],  # (num_agents_max, )
+        #             "padding_mask": padding_mask,      # (num_agents_max, )
+        #         }
+        #     return multi_obs
         else:
             raise ValueError(f"self.env_mode: 'single_env' / 'multi_env'; not {self.config.env.env_mode}; in get_obs()")
 
@@ -982,19 +970,15 @@ class LazyVicsekEnv(gym.Env):
     def check_episode_termination(self, state, rel_state, comm_loss_agents):
         """
         Check if the episode is terminated:
-            (1) *position std*: sqrt(V(x)+V(y)) < std_p_converged
-            (2) *velocity std*: sqrt(V(vx)+V(vy)) < std_v_converged
-            (3) *pos std rate*: max of (sqrt(V(x)+V(y))) - min of (sqrt(V(x)+V(y))) < std_p_rate_converged
-                in the last 50 iterations
-            (4) *vel std rate*: max of (sqrt(V(vx)+V(vy))) - min of (sqrt(V(vx)+V(vy))) < std_v_rate_converged
-                in the last 50 iterations
-            (5) *max_time_step*: time_step > max_time_step
-            (6) *communication*: any agent loses communication with all other agents -> done==True
-        :return: done
+        1. If the alignment is achieved
+        2. If the max_time_step is reached
+        3. If communication is lost
+        :return: done(s)
         """
         padding_mask = state["padding_mask"]
         done = False
 
+        # Check alignment
         if self.alignment_hist[self.time_step] > self.config.env.alignment_goal:
             if not self.config.env.use_fixed_episode_length:
                 if self.time_step >= 49:
@@ -1004,36 +988,11 @@ class LazyVicsekEnv(gym.Env):
                     if max_alignment - min_alignment < self.config.env.alignment_rate_goal:
                         done = True
 
-        # Compute the current position and velocity std
-        # agent_positions = state["agent_states"][:, :2][padding_mask]  # (num_agents, 2)
-        # agent_velocities = state["agent_states"][:, 2:4][padding_mask]  # (num_agents, 2)
-        # pos_std = np.sqrt(np.sum(np.var(agent_positions, axis=0)))  # scalar
-        # vel_std = np.sqrt(np.sum(np.var(agent_velocities, axis=0)))  # scalar
-        # self.std_pos_hist[self.time_step] = pos_std
-        # self.std_vel_hist[self.time_step] = vel_std
-
-        # Check (1) and (2)
-        # is_pos_std_converged = pos_std < self.config.env.std_p_goal  # (1)
-        # is_vel_std_converged = vel_std < self.config.env.std_v_goal  # (2)
-        # are_stds_converged = is_vel_std_converged  # and is_pos_std_converged
-
-        # if are_stds_converged and not self.config.env.use_fixed_episode_length:
-        #     if self.time_step >= 49:  # magic number!!! (sigh)
-        #         # Check (3)
-        #         last_n_pos_stds = self.std_pos_hist[self.time_step - 49:self.time_step + 1]
-        #         max_pos_std = np.max(last_n_pos_stds)
-        #         min_pos_std = np.min(last_n_pos_stds)
-        #         if max_pos_std - min_pos_std < self.config.env.std_p_rate_goal:
-        #             # Check (4)
-        #             last_n_vel_stds = self.std_vel_hist[self.time_step - 49:self.time_step + 1]
-        #             max_vel_std = np.max(last_n_vel_stds)
-        #             min_vel_std = np.min(last_n_vel_stds)
-        #             done = max_vel_std - min_vel_std < self.config.env.std_v_rate_goal
-        # Check (5)
+        # Check max_time_step
         if self.time_step >= self.config.env.max_time_steps - 1:
             done = True
 
-        # Check (6)
+        # Check communication loss
         if self.config.env.comm_range is not None:
             if comm_loss_agents.any():
                 done = False if self.config.env.ignore_comm_lost_agents else True
