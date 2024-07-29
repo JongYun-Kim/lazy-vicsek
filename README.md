@@ -17,9 +17,11 @@
   - Less abstractions but quicker! just like before
   - But how are you going to deal with Laziest models (i.e. both lazy listenr and controller) ???
     - idk...
+    - Thesis first and then go for 
 - [x] ~~Build model~~
   - [x] ~~lazy listener~~
   - [x] ~~lazy controller~~
+- [ ] Env & Model Updated: local comm integrated ~~(took a lot of time, fkin'H)~~
 - [ ] Hyperparam tuning
 - [ ] Train and save the model
 - [ ] Evaluate the model
@@ -35,9 +37,12 @@
 - Centralized training (decentralized executable tho)
 - No noise in training phase
   - Training with noise is out of the scope of this project 
-- Communications: Fully connected
-  - Plan to test out partially connected communication setting for scalability and real-world applicability
-
-
-## Communication Checks
-- Don't yak, my yam!
+- Communications: ~~Fully connected~~ -> Must be locally connected; distance-based communication
+  - ~~Plan to test out partially connected communication setting for scalability and real-world applicability~~
+  - With fully connected network, Vicsek beats every other neighbor selections cuz it converges with a single time step update
+- Model
+  - Observation divided into n sub-observations (n = number of agents)
+  - Forward-passes are done in parallel
+  - Sub-logits are concatenated to form the final logits (believe RLlib updates the model accordingly; PPO updates are pretty simple!)
+  - Action distribution: Multi-Binary (implemented by Multi-MultiBinomial with two actions to facilitate the built-in RLlib ActionDistribution)
+-
