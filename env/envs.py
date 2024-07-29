@@ -55,6 +55,7 @@ class LazyVicsekEnvConfig(BaseModel):
     std_v_rate_goal: float = 0.2
     alignment_goal: float = 0.96
     alignment_rate_goal: float = 0.04
+    alignment_window_length: int = 50
     use_fixed_episode_length: bool = False
     get_state_hist: bool = False
     get_action_hist: bool = False
@@ -123,9 +124,7 @@ def config_to_env_input(config_instance: Config, seed_id: Optional[int] = None) 
 
 
 class LazyVicsekEnv(gym.Env):
-    def __init__(self,
-                 env_context: dict,
-                 ):
+    def __init__(self, env_context: dict):
         super().__init__()
         seed_id = env_context['seed_id'] if 'seed_id' in env_context else None
         self.seed(seed_id)
@@ -187,8 +186,9 @@ class LazyVicsekEnv(gym.Env):
         # Define OBSERVATION SPACE
         if self.config.env.env_mode == "single_env":
             self.observation_space = Dict({
-                "centralized_agents_info": Box(low=-np.inf, high=np.inf,
-                                               shape=(self.num_agents_max, self.config.env.obs_dim), dtype=np.float64),
+                "local_agent_infos": Box(low=-np.inf, high=np.inf,
+                                         shape=(self.num_agents_max, self.num_agents_max, self.config.env.obs_dim),
+                                         dtype=np.float64),
                 "neighbor_masks": Box(low=0, high=1, shape=(self.num_agents_max, self.num_agents_max), dtype=np.bool_),
                 "padding_mask": Box(low=0, high=1, shape=(self.num_agents_max,), dtype=np.bool_)
             })
@@ -242,7 +242,7 @@ class LazyVicsekEnv(gym.Env):
             assert len(self.num_agents_pool_np.shape) == 1, "num_agents_pool must be a np-array of shape (n, ), n > 1"
             assert all(self.num_agents_pool_np > 1), "all values in num_agents_pool must be > 1"
         else:
-            raise NotImplementedError("Something wrong; check _validate_config() of LazyFusionEnv; must not reach here")
+            raise NotImplementedError("Something wrong; check _validate_config() of LazyVicsekEnv; must not reach here")
         # Note: Now self.num_agents_pool is a ndarray of possible num_agents; ㅇㅋ?
 
         # Set num_agents_min and num_agents_max
@@ -512,6 +512,18 @@ class LazyVicsekEnv(gym.Env):
         # if self.time_step != 0:
         #     assert np.all(action.sum(axis=1) - np.diag(action) > 0), \
         #         "Each row in action, except self-loops, must have at least one True value"
+
+    def get_vicsek_action(self):
+        neighbor_masks = self.state["neighbor_masks"]  # shape (num_agents_max, num_agents_max)
+        padding_mask = self.state["padding_mask"]  # shape (num_agents_max)
+        padding_mask_2d = padding_mask[:, np.newaxis] & padding_mask[np.newaxis, :]  # (num_agents_max, num_agents_max)
+
+        # Vicsek action: logical and between the neighbor_masks and the padding_mask_2d
+        vicsek_action = neighbor_masks & padding_mask_2d  # (num_agents_max, num_agents_max)
+        # Make vicsek_action an integer subtype numpy array
+        vicsek_action = vicsek_action.astype(np.int8)
+
+        return vicsek_action
 
     def to_binary_action(self, action_in_another_type):
         if self.config.env.action_type == "binary_vector":
@@ -795,14 +807,6 @@ class LazyVicsekEnv(gym.Env):
         agent_positions = agent_states[:, :2]  # (num_agents_max, 2)
         # Get active relative distances
         if self.config.env.periodic_boundary:
-            # rel_data_absolute, _ = np.abs(self.get_relative_info(data=agent_positions, mask=padding_mask,
-            #                                                      get_dist=False, get_active_only=True))
-            # # Apply periodic boundary conditions
-            # width, height = self.config.control.initial_position_bound, self.config.control.initial_position_bound
-            # wrapped_diff = np.minimum(rel_data_absolute, np.array([width, height]) - rel_data_absolute)
-            # # Compute distances
-            # rel_dist = np.linalg.norm(wrapped_diff, axis=2)  # (num_agents, num_agents)
-            #
             rel_pos_normal, _ = self.get_relative_info(data=agent_positions, mask=padding_mask,
                                                        get_dist=False, get_active_only=True)
             width = height = self.config.control.initial_position_bound
@@ -944,9 +948,9 @@ class LazyVicsekEnv(gym.Env):
             return post_processed_obs
         # # In case of the base implementation (with no post-processing)
         if self.config.env.env_mode == "single_env":
-            obs = {"centralized_agents_info": agents_obs,    # (num_agents_max, num_agents_max, obs_dim)
-                   "neighbor_masks": neighbor_masks,         # (num_agents_max, num_agents_max)
-                   "padding_mask": padding_mask,             # (num_agents_max)
+            obs = {"local_agent_infos": agents_obs,     # (num_agents_max, num_agents_max, obs_dim)
+                   "neighbor_masks": neighbor_masks,    # (num_agents_max, num_agents_max)
+                   "padding_mask": padding_mask,        # (num_agents_max)
                    }
             return obs
         # elif self.config.env.env_mode == "multi_env":
@@ -981,8 +985,9 @@ class LazyVicsekEnv(gym.Env):
         # Check alignment
         if self.alignment_hist[self.time_step] > self.config.env.alignment_goal:
             if not self.config.env.use_fixed_episode_length:
-                if self.time_step >= 49:
-                    last_n_alignments = self.alignment_hist[self.time_step - 49:self.time_step + 1]
+                win_len = self.config.env.alignment_window_length - 1
+                if self.time_step >= win_len:
+                    last_n_alignments = self.alignment_hist[self.time_step - win_len:self.time_step + 1]
                     max_alignment = np.max(last_n_alignments)
                     min_alignment = np.min(last_n_alignments)
                     if max_alignment - min_alignment < self.config.env.alignment_rate_goal:
@@ -994,7 +999,7 @@ class LazyVicsekEnv(gym.Env):
 
         # Check communication loss
         if self.config.env.comm_range is not None:
-            if comm_loss_agents.any():
+            if comm_loss_agents.any() and not done:
                 done = False if self.config.env.ignore_comm_lost_agents else True
                 self.lost_comm_step = self.time_step if self.has_lost_comm is not None else self.lost_comm_step
                 self.has_lost_comm = True

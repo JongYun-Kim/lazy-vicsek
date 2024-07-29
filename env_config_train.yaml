@@ -26,6 +26,7 @@ env:
 #  std_v_rate_goal: 0.2
 #  alignment_goal: 0.96
 #  alignment_rate_goal: 0.1
+#  alignment_window_length: 50
   use_fixed_episode_length: true
 #  get_state_hist: false
 #  get_action_hist: false
