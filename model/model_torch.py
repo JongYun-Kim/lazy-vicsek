@@ -10,8 +10,8 @@ import torch.nn as nn
 # Custom modules
 
 
-class LazyVicsekActor(nn.Module):
-    def __init__(self, src_embed, encoder, decoder, generator):
+class LazyVicsekListener(nn.Module):
+    def __init__(self, src_embed, encoder, decoder, generator, d_embed_context):
 
         super().__init__()
 
@@ -21,6 +21,7 @@ class LazyVicsekActor(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.generator = generator
+        self.d_embed_context = d_embed_context
 
         # Custom layers, if needed
         #
@@ -37,18 +38,30 @@ class LazyVicsekActor(nn.Module):
         # Get sub-attention scores
         att_scores = torch.zeros_like(network)  # (batch_size, num_agents_max, num_agents_max)
         num_agents_max = agent_infos.shape[1]
+        num_agents = padding_mask.sum(dim=1).int()  # (batch_size,); number of agents in each sample
+        h_c_N_accumulator = torch.zeros(agent_infos.shape[0], 1, self.d_embed_context, device=agent_infos.device)
+
         for i in range(num_agents_max):  # TODO: [MUST] push agent dim onto batch dim to parallelize
             local_agent_info = agent_infos[:, i, :, :]
             local_network = network[:, i, :]
-            padding_mask = padding_mask
 
-            # shape: (batch_size, num_agents_max)
-            sub_att_scores = self.local_forward(local_agent_info, local_network, padding_mask)
+            # sub_att_scores: shape: (batch_size, num_agents_max)
+            # h_c_N: shape: (batch_size, 1, d_embed_context)
+            sub_att_scores, _, h_c_N = self.local_forward(local_agent_info, local_network, padding_mask)
 
             # Get the i-th row of the attention scores
             att_scores[:, i, :] = sub_att_scores
 
-        return att_scores  # (batch_size, num_agents_max, num_agents_max)
+            # Accumulate h_c_N values
+            h_c_N_accumulator += h_c_N
+
+        # Calculate average_h_c_N
+        num_agents = num_agents.view(-1, 1, 1).float()  # (batch_size, 1, 1)
+        average_h_c_N = h_c_N_accumulator / num_agents
+
+        # att_scores: (batch_size, num_agents_max, num_agents_max)
+        # average_h_c_N: (batch_size, 1, d_embed_context)
+        return att_scores, average_h_c_N
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
@@ -69,12 +82,16 @@ class LazyVicsekActor(nn.Module):
         src = local_agent_info  # (batch_size, num_agents_max, d_v)
 
         # Get masks
-        src_mask_tokens = local_network  # (batch_size, num_agents_max==seq_len_src)
+        # local_network:
+        # # 0: padding / disconnected, 1: connected
+        # # 0: no attention,           1: attention
+        # # 0: False in mask,          1: True in mask
+        src_mask_tokens = local_network.ne(0)  # (batch_size, num_agents_max==seq_len_src)  bool tensor
         src_mask_idx = 0
         src_mask = self.make_src_mask(src_mask_tokens, mask_idx=src_mask_idx)  # (batch_size, seq_len_src, seq_len_src)
         tgt_mask = None  # No (masked) self-attention layer in the decoder block
         context_mask_token = torch.zeros_like(src_mask_tokens[:, 0:1])  # (batch_size, 1); it's 2D
-        # In Cross-Attention, Q=tgt=context, K/V=src=enc_out
+        # In the Cross-Attention, Q=tgt=context, K/V=src=enc_out
         src_tgt_mask = self.make_src_tgt_mask(src_mask_tokens, context_mask_token, mask_idx=src_mask_idx)
 
         # Embedding: in the encoder method
@@ -84,14 +101,16 @@ class LazyVicsekActor(nn.Module):
         # unsqueeze(1) has been applied to src_mask to broadcast over head dim in the MHA layer
         encoder_out = self.encode(src, src_mask.unsqueeze(1))
 
-        # Context embedding, if needed
+        # Context embedding, if needed  # TODO: src_mask_tokens를 boolean 으로!
         h_c_N = self.get_context_vector(embeddings=encoder_out, pad_tokens=1-src_mask_tokens,
                                         use_embeddings_mask=True, debug=True)  # (batch_size, 1, d_embed_context)
 
         # Decoder: Cross-Attention (glimpse); Q: context, K/V: encoder_out
-
+        # decoder_out: shape: (batch_size, 1, d_embed_context)
+        decoder_out = self.decode(h_c_N, encoder_out, tgt_mask, src_tgt_mask.unsqueeze(1))  # h_c_(N+1)
 
         # Generator: raw attention scores by CA; Q: rich-context (decoder_out), K/V: encoder_out
+        sub_att_scores = self.generator(query=decoder_out, key=encoder_out, mask=src_tgt_mask).squeeze(1)  # kill q dim
 
         # sub_att_scores: (batch_size, num_agents_max)
         # decoder_out: (batch_size, 1, d_embed_context)
@@ -105,7 +124,7 @@ class LazyVicsekActor(nn.Module):
         # Obtain batch_size, num_agents, data_size from embeddings
         batch_size, num_agents_max, data_size = embeddings.shape
 
-        if use_embeddings_mask:
+        if use_embeddings_mask:  # TODO: Could be way simpler
             # Expand the dimensions of pad_tokens to match the shape of embeddings
             mask = pad_tokens.unsqueeze(-1).expand_as(embeddings)  # (batch_size, num_agents_max, data_size)
 

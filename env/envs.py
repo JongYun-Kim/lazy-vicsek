@@ -164,8 +164,9 @@ class LazyVicsekEnv(gym.Env):
         self.action_dtype = None
         if self.config.env.env_mode == "single_env":
             if self.config.env.action_type == "binary_vector":
-                self.action_space = Box(low=0, high=1, shape=(self.num_agents_max, self.num_agents_max), dtype=np.int8)
                 self.action_dtype = np.int8
+                self.action_space = Box(low=0, high=1,
+                                        shape=(self.num_agents_max, self.num_agents_max), dtype=self.action_dtype)
             else:
                 raise NotImplementedError("action_type must be binary_vector. "
                                           "The radius and continuous_vector are still in alpha, sorry.")

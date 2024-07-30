@@ -17,13 +17,6 @@ class MultiHeadAttentionLayer(nn.Module):
         self.q_fc = copy.deepcopy(q_fc)   # (d_embed_query, d_model)
         self.k_fc = copy.deepcopy(kv_fc)  # (d_embed_key,   d_model)
         self.v_fc = copy.deepcopy(kv_fc)  # (d_embed_value, d_model)
-        # TODO: Please remove the copy.deepcopy() if it is not necessary.
-        #  (maybe not necessary for q_fc but necessary for k_fc and v_fc)
-        #  In my understanding, uses of copy.deepcopy() are fine if it is used in __init__().
-        #  But, if I don't need a copy of the (input) object, I shouldn't use copy.deepcopy() for better performance.
-        # self.q_fc = nn.Linear(q_fc.in_features, q_fc.out_features, bias=q_fc.bias is not None)
-        # self.k_fc = nn.Linear(kv_fc.in_features, kv_fc.out_features, bias=kv_fc.bias is not None)
-        # self.v_fc = nn.Linear(kv_fc.in_features, kv_fc.out_features, bias=kv_fc.bias is not None)
 
         # W^O transforms the attention vectors to d_embed_MHA_out dimension (desired output dim, mostly idempotent)
         self.out_fc = out_fc                  # (d_model, d_embed_MHA_out)

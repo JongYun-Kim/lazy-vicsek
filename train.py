@@ -33,6 +33,26 @@ if __name__ == "__main__":
     env_name = "vicsek_lazy_env"
     register_env(env_name, lambda cfg: LazyVicsekEnv(cfg))
 
+    # Set up custom model configuration
+    custom_model_config = {
+        "share_layers": True,
+        "d_subobs": 6,
+        "d_embed_input": 128,
+        "d_embed_context": 128,
+        "d_model": 128,
+        "d_model_decoder": 128,
+        "n_layers_encoder": 3,
+        "n_layers_decoder": 1,
+        "num_heads": 8,
+        "d_ff": 512,
+        "d_ff_decoder": 512,
+        "dr_rate": 0,
+        "norm_eps": 1e-5,
+        "is_bias": False,  # Default is False, but True used in LazyControl
+        "use_residual_in_decoder": True,
+        "use_FNN_in_decoder": True
+    }
+
     # register your custom model
     model_name = "vicsek_lazy_listener"
     ModelCatalog.register_custom_model(model_name, LazyListenerModelPPOTest)
@@ -40,12 +60,12 @@ if __name__ == "__main__":
     # train
     tune.run(
         "PPO",
-        name="lazy_initial_test_240618",
+        name="infolazy_vicsek_0729",
         # resume=True,
         # stop={"episode_reward_mean": -101},
         # stop={"training_iteration": 300},
         checkpoint_freq=1,
-        keep_checkpoints_num=12,
+        keep_checkpoints_num=16,
         checkpoint_at_end=True,
         checkpoint_score_attr="episode_reward_mean",
         config={
@@ -57,7 +77,7 @@ if __name__ == "__main__":
             #
             "model": {
                 "custom_model": model_name,
-                # "custom_model_config": custom_model_config,
+                "custom_model_config": custom_model_config,
                 # "custom_action_dist": "det_cont_action_dist" if custom_model_config["use_deterministic_action_dist"] else None,
             },
             "num_gpus": 0.5,
@@ -73,8 +93,6 @@ if __name__ == "__main__":
             # "lr_schedule": [[0, 2e-5],
             #                 [1e7, 1e-7],
             #                 ],
-            # add more hyperparameters here as needed
-            #############################
             # Must be fine-tuned when sharing vf-policy layers
             "vf_loss_coeff": 0.25,
             # In the...
