@@ -1,15 +1,10 @@
 # Everything is copy
 import copy
 # Please let me get out of ray rllib
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2, ModelV2
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.utils.typing import ModelConfigDict, TensorType
-from ray.rllib.utils.annotations import override
-from ray.rllib.models.preprocessors import get_preprocessor
-from ray.rllib.models.torch.misc import SlimFC, normc_initializer
 #
 # From envs
-import numpy as np
-from gym.spaces import Discrete
 from typing import List, Union, Dict
 #
 # Pytorch
@@ -17,7 +12,6 @@ import torch
 import torch.nn as nn
 #
 # For the custom model
-from model.model_torch import ActorTest, CriticTest
 from model.model_torch import LazyVicsekListener
 # Custom modules
 from model.modules.token_embedding import LinearEmbedding
@@ -179,18 +173,15 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
 
         obs_dict = input_dict["obs"]
 
-        if self.share_layers:
-            # att: (batch_size, num_agents_max, num_agents_max)
-            # h_c_N: (batch_size, 1, d_embed_context)
-            att, h_c_N = self.actor(obs_dict)
-            x = self.attention_scores_to_logits(att)  # (batch_size, num_agents_max * num_agents_max * 2)
-            self.values = h_c_N.squeeze(1)  # (batch_size, d_embed_context)
-        else:
-            att, _ = self.actor(obs_dict)  # (batch_size, num_agents_max, num_agents_max)
-            x = self.attention_scores_to_logits(att)  # (batch_size, num_agents_max * num_agents_max * 2)
-            _, self.values = self.critic(obs_dict).squeeze(1)  # (batch_size, d_embed_context)
+        # att: (batch_size, num_agents_max, num_agents_max)
+        # h_c_N: (batch_size, 1, d_embed_context)
+        att, h_c_N = self.actor(obs_dict)
+        x = self.attention_scores_to_logits(att)  # (batch_size, num_agents_max * num_agents_max * 2)
 
-        self.values = self.critic(obs_dict)  # (batch_size, 1)
+        if self.share_layers:
+            self.values = h_c_N.squeeze(1)                      # (batch_size, d_embed_context)
+        else:
+            self.values = self.critic(obs_dict)[1].squeeze(1)   # (batch_size, d_embed_context)
 
         return x, state
 
