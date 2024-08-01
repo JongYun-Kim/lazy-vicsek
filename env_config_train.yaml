@@ -1,34 +1,23 @@
 control:
-#  speed: 15.0
-  predefined_distance: 60.0  # Must be specified
-#  communication_decay_rate: 0.3333333333333333
-#  cost_weight: 1.0
-#  inter_agent_strength: 5.0
-#  bonding_strength: 1.0
-#  k1: 1.0
-#  k2: 3.0
-#  max_turn_rate: 1e3
-#  initial_position_bound: 250.0
+  speed: 5.0
+  max_turn_rate: 1e3
+  initial_position_bound: 100.0
 
 env:
 #  seed: null
-#  obs_dim: 4
-#  agent_name_prefix: 'agent_'
-#  env_mode: 'single_env'
-#  action_type: 'binary_vector'
-  num_agents_pool: [20]  # Must be specified
-#  dt: 0.1
-#  comm_range: null
-#  max_time_steps: 500
-#  std_p_goal: null
-#  std_v_goal: 0.1
-#  std_p_rate_goal: 0.1
-#  std_v_rate_goal: 0.2
-#  alignment_goal: 0.96
-#  alignment_rate_goal: 0.1
-#  alignment_window_length: 50
+  obs_dim: 6
+  agent_name_prefix: 'agent_'
+  env_mode: 'single_env'
+  action_type: 'binary_vector'
+#  num_agents_pool: [20]  # Must be specified in your lines to be more explicit
+  dt: 0.1
+  comm_range: null
+  max_time_steps: 500
+  alignment_goal: 0.97
+  alignment_rate_goal: 0.02
+  alignment_window_length: 32
   use_fixed_episode_length: true
-#  get_state_hist: false
-#  get_action_hist: false
+  get_state_hist: false
+  get_action_hist: false
   periodic_boundary: true
   ignore_comm_lost_agents: true  # Check this!

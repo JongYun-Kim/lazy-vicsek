@@ -1,6 +1,6 @@
 control:
 #  speed: 15.0
-  predefined_distance: 60.0  # Must be specified
+#  predefined_distance: 60.0
 #  communication_decay_rate: 0.3333333333333333
 #  cost_weight: 1.0
 #  inter_agent_strength: 5.0
@@ -24,8 +24,9 @@ env:
 #  std_v_goal: 0.1
 #  std_p_rate_goal: 0.1
 #  std_v_rate_goal: 0.2
-#  alignment_goal: 0.96
+#  alignment_goal: 0.97
 #  alignment_rate_goal: 0.1
+#  alignment_window_length: 32
 #  use_fixed_episode_length: false
 #  get_state_hist: false
 #  get_action_hist: false

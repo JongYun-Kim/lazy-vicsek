@@ -26,13 +26,13 @@ import yaml
 
 class ControlConfig(BaseModel):
     speed: float = 15.0  # Speed in m/s.
-    predefined_distance: float = 60.0  # Predefined distance in meters.
-    communication_decay_rate: float = 1/3  # Communication decay rate.
-    cost_weight: float = 1.0  # Cost weight.
-    inter_agent_strength: float = 5.0  # Inter agent strength.
-    bonding_strength: float = 1.0  # Bonding strength.
-    k1: float = 1.0  # K1 coefficient.
-    k2: float = 3.0  # K2 coefficient.
+    # predefined_distance: float = 60.0  # Predefined distance in meters.
+    # communication_decay_rate: float = 1/3  # Communication decay rate.
+    # cost_weight: float = 1.0  # Cost weight.
+    # inter_agent_strength: float = 5.0  # Inter agent strength.
+    # bonding_strength: float = 1.0  # Bonding strength.
+    # k1: float = 1.0  # K1 coefficient.
+    # k2: float = 3.0  # K2 coefficient.
     max_turn_rate: float = 1e3  # Maximum turn rate in rad/s.
     initial_position_bound: float = 250.0  # Initial position bound in meters.
 
@@ -53,9 +53,9 @@ class LazyVicsekEnvConfig(BaseModel):
     std_v_goal: float = 0.1
     std_p_rate_goal: float = 0.1
     std_v_rate_goal: float = 0.2
-    alignment_goal: float = 0.96
-    alignment_rate_goal: float = 0.04
-    alignment_window_length: int = 50
+    alignment_goal: float = 0.97
+    alignment_rate_goal: float = 0.03
+    alignment_window_length: int = 32
     use_fixed_episode_length: bool = False
     get_state_hist: bool = False
     get_action_hist: bool = False
@@ -82,17 +82,17 @@ class Config(BaseModel):
         # You can add validation logic for the LazyVicsekEnvConfig here if needed
         return v
 
-    # @model_validator(mode='after')
-    @root_validator
-    def set_dependent_defaults(cls, values):
-        # if values.env.std_p_goal is None:
-        #     values.env.std_p_goal = 0.7 * values.control.predefined_distance
-        env_config = values.get('env')
-        control_config = values.get('control')
-        if env_config and control_config:
-            if env_config.std_p_goal is None:
-                env_config.std_p_goal = 0.7 * control_config.predefined_distance
-        return values
+    # # @model_validator(mode='after')
+    # @root_validator
+    # def set_dependent_defaults(cls, values):
+    #     # if values.env.std_p_goal is None:
+    #     #     values.env.std_p_goal = 0.7 * values.control.predefined_distance
+    #     env_config = values.get('env')
+    #     control_config = values.get('control')
+    #     if env_config and control_config:
+    #         if env_config.std_p_goal is None:
+    #             env_config.std_p_goal = 0.7 * control_config.predefined_distance
+    #     return values
 
 
 def load_dict(path: str) -> dict:
