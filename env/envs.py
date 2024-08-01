@@ -191,7 +191,8 @@ class LazyVicsekEnv(gym.Env):
                                          shape=(self.num_agents_max, self.num_agents_max, self.config.env.obs_dim),
                                          dtype=np.float64),
                 "neighbor_masks": Box(low=0, high=1, shape=(self.num_agents_max, self.num_agents_max), dtype=np.bool_),
-                "padding_mask": Box(low=0, high=1, shape=(self.num_agents_max,), dtype=np.bool_)
+                "padding_mask": Box(low=0, high=1, shape=(self.num_agents_max,), dtype=np.bool_),
+                "is_from_my_env": Box(low=0, high=1, shape=(), dtype=np.bool_),
             })
         elif self.config.env.env_mode == "multi_env":
             self.observation_space = Dict({
@@ -952,6 +953,7 @@ class LazyVicsekEnv(gym.Env):
             obs = {"local_agent_infos": agents_obs,     # (num_agents_max, num_agents_max, obs_dim)
                    "neighbor_masks": neighbor_masks,    # (num_agents_max, num_agents_max)
                    "padding_mask": padding_mask,        # (num_agents_max)
+                   "is_from_my_env": 1,
                    }
             return obs
         # elif self.config.env.env_mode == "multi_env":

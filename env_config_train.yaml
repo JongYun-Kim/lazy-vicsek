@@ -9,7 +9,7 @@ env:
   agent_name_prefix: 'agent_'
   env_mode: 'single_env'
   action_type: 'binary_vector'
-#  num_agents_pool: [20]  # Must be specified in your lines to be more explicit
+  num_agents_pool: [20]  # Must be specified in your lines to be more explicit
   dt: 0.1
   comm_range: null
   max_time_steps: 500

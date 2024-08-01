@@ -183,6 +183,11 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
         else:
             self.values = self.critic(obs_dict)[1].squeeze(1)   # (batch_size, d_embed_context)
 
+        # batch_size = h_c_N.shape[0]
+        # if batch_size != 32 and batch_size !=1:
+        #     print(f"batch_size = {batch_size}")
+        #     print("stopped for a debuggin purpose")
+
         return x, state
 
     def attention_scores_to_logits(self, attention_scores: TensorType) -> TensorType:

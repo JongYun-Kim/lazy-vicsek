@@ -31,6 +31,7 @@ class LazyVicsekListener(nn.Module):
         agent_infos = obs_dict["local_agent_infos"]  # (batch_size, num_agents_max, num_agents_max, obs_dim)
         network = obs_dict["neighbor_masks"]  # (batch_size, num_agents_max, num_agents_max); (:,i,:): i-th agent's net
         padding_mask = obs_dict["padding_mask"]  # (batch_size, num_agents_max); applies over all agents same
+        is_from_my_env = obs_dict["is_from_my_env"]  # (batch_size,); 1: from my env, 0: under the env_check
         # Caution: masks are torch FLOAT tensors, not boolean tensors, which I don't like in RLlib (v2.1.0)
 
         # TODO: Currently, padding agents are not supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
@@ -47,7 +48,7 @@ class LazyVicsekListener(nn.Module):
 
             # sub_att_scores: shape: (batch_size, num_agents_max)
             # h_c_N: shape: (batch_size, 1, d_embed_context)
-            sub_att_scores, _, h_c_N = self.local_forward(local_agent_info, local_network, padding_mask)
+            sub_att_scores, _, h_c_N = self.local_forward(local_agent_info, local_network, padding_mask, is_from_my_env)
 
             # Get the i-th row of the attention scores
             att_scores[:, i, :] = sub_att_scores
@@ -69,11 +70,12 @@ class LazyVicsekListener(nn.Module):
     def decode(self, tgt, encoder_out, tgt_mask, src_tgt_mask):
         return self.decoder(tgt, encoder_out, tgt_mask, src_tgt_mask)
 
-    def local_forward(self, local_agent_info, local_network, padding_mask):
+    def local_forward(self, local_agent_info, local_network, padding_mask, is_from_my_env):
         """
         :param local_agent_info: (batch_size, num_agents_max, obs_dim)
         :param local_network:    (batch_size, num_agents_max)
         :param padding_mask:     (batch_size, num_agents_max)
+        :param is_from_my_env:   (batch_size,)
         :return: sub_att_scores: (batch_size, num_agents_max)
         """
         assert local_agent_info.shape[2] == self.d_v  # TODO: remove this line after debugging
@@ -102,7 +104,8 @@ class LazyVicsekListener(nn.Module):
         encoder_out = self.encode(src, src_mask.unsqueeze(1))
 
         # Context embedding, if needed  # TODO: src_mask_tokens를 boolean 으로!
-        h_c_N = self.get_context_vector(embeddings=encoder_out, pad_tokens=1-src_mask_tokens,
+        h_c_N = self.get_context_vector(embeddings=encoder_out, pad_tokens=~src_mask_tokens,
+                                        is_from_my_env=is_from_my_env,
                                         use_embeddings_mask=True, debug=True)  # (batch_size, 1, d_embed_context)
 
         # Decoder: Cross-Attention (glimpse); Q: context, K/V: encoder_out
@@ -110,16 +113,17 @@ class LazyVicsekListener(nn.Module):
         decoder_out = self.decode(h_c_N, encoder_out, tgt_mask, src_tgt_mask.unsqueeze(1))  # h_c_(N+1)
 
         # Generator: raw attention scores by CA; Q: rich-context (decoder_out), K/V: encoder_out
-        sub_att_scores = self.generator(query=decoder_out, key=encoder_out, mask=src_tgt_mask).squeeze(1)  # kill q dim
+        sub_att_scores = self.generator(input_query=decoder_out, input_key=encoder_out, mask=src_tgt_mask).squeeze(1)  # kill q dim
 
         # sub_att_scores: (batch_size, num_agents_max)
         # decoder_out: (batch_size, 1, d_embed_context)
         # h_c_N: (batch_size, 1, d_embed_context)
         return sub_att_scores, decoder_out, h_c_N
 
-    def get_context_vector(self, embeddings, pad_tokens, use_embeddings_mask=True, debug=False):
+    def get_context_vector(self, embeddings, pad_tokens, is_from_my_env, use_embeddings_mask=True, debug=False):
         # embeddings: shape (batch_size, num_agents_max==seq_len_src, data_size==d_embed_input)
         # pad_tokens: shape (batch_size, num_agents_max==seq_len_src)
+        # is_from_my_env: shape (batch_size,)
 
         # Obtain batch_size, num_agents, data_size from embeddings
         batch_size, num_agents_max, data_size = embeddings.shape
@@ -139,8 +143,9 @@ class LazyVicsekListener(nn.Module):
             # Check if there is any sample where all agents are padded
             if debug:
                 if torch.any(embeddings_count == 0):
-                    raise ValueError("All agents are padded in at least one sample.")
-
+                    if is_from_my_env.sum() == batch_size:  # all samples are from my env but padded
+                        raise ValueError("All agents are padded in at least one sample.")
+                    # else:  It's in the env_check mode, so it's okay to have all agents padded.
             # Compute the average embeddings, only for non-masked elements
             embeddings_avg = embeddings_sum / embeddings_count
         else:
