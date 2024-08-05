@@ -8,8 +8,8 @@ from model.model_rllib import LazyVicsekModelPPO
 
 if __name__ == "__main__":
 
-    # do_debug = False
-    do_debug = True
+    do_debug = False
+    # do_debug = True
 
     if do_debug:
         ray.init(local_mode=True)
@@ -19,13 +19,13 @@ if __name__ == "__main__":
     my_config = load_config(default_config_path)
     # env-env config:
     my_config.env.num_agents_pool = [20]
-    my_config.env.max_time_steps = 100
+    my_config.env.max_time_steps = 500
     my_config.env.alignment_goal = 0.97
     my_config.env.alignment_rate_goal = 0.02
     my_config.env.use_fixed_episode_length = True
-    my_config.env.comm_range = 5
+    my_config.env.comm_range = 8
     # env-control config:
-    my_config.control.speed = 5.0
+    my_config.control.speed = 4.0
     my_config.control.initial_position_bound = 100.0
     my_config.control.max_turn_rate = 1e3  # classical Vicsek models adopt particle dynamics
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
 
     # Set up custom model configuration
     custom_model_config = {
-        "share_layers": True,
+        "share_layers": False,
         "d_subobs": 6,
         "d_embed_input": 128,
         "d_embed_context": 128,
@@ -54,7 +54,8 @@ if __name__ == "__main__":
         "norm_eps": 1e-5,
         "is_bias": False,  # Default is False, but True used in LazyControl
         "use_residual_in_decoder": True,
-        "use_FNN_in_decoder": True
+        "use_FNN_in_decoder": True,
+        "scale_factor": 1e-3,
     }
 
     # register your custom model
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     # train
     tune.run(
         "PPO",
-        name = "debugging0731",
+        name="debugging0731",
         # name="infolazy_vicsek_0729",
         # resume=True,
         # stop={"episode_reward_mean": -101},
@@ -85,16 +86,16 @@ if __name__ == "__main__":
                 "custom_model_config": custom_model_config,
                 # "custom_action_dist": "det_cont_action_dist" if custom_model_config["use_deterministic_action_dist"] else None,
             },
-            "num_gpus": 0,
-            "num_workers": 0,
-            # "num_envs_per_worker": 1,
-            "rollout_fragment_length": 200,
-            "train_batch_size": 200,
-            "sgd_minibatch_size": 100,
-            "num_sgd_iter": 4,
+            "num_gpus": 1,
+            "num_workers": 12,
+            "num_envs_per_worker": 2,
+            "rollout_fragment_length": 500,
+            "train_batch_size": 500*24,
+            "sgd_minibatch_size": 256,
+            "num_sgd_iter": 10,
             # "batch_mode": "complete_episodes",
             # "batch_mode": "truncate_episodes",
-            "lr": 5e-5,
+            "lr": 2e-5,
             # "lr_schedule": [[0, 2e-5],
             #                 [1e7, 1e-7],
             #                 ],
@@ -103,7 +104,7 @@ if __name__ == "__main__":
             # In the...
             "use_critic": True,
             "use_gae": True,
-            "gamma": 0.99,
+            "gamma": 0.992,
             "lambda": 0.95,
             "kl_coeff": 0,  # no PPO penalty term; we use PPO-clip anyway; if none zero, be careful Nan in tensors!
             # "entropy_coeff": tune.grid_search([0, 0.001, 0.0025, 0.01]),

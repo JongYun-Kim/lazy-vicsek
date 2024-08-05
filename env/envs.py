@@ -953,7 +953,7 @@ class LazyVicsekEnv(gym.Env):
             obs = {"local_agent_infos": agents_obs,     # (num_agents_max, num_agents_max, obs_dim)
                    "neighbor_masks": neighbor_masks,    # (num_agents_max, num_agents_max)
                    "padding_mask": padding_mask,        # (num_agents_max)
-                   "is_from_my_env": 1,
+                   "is_from_my_env": np.array(True, dtype=np.bool_),
                    }
             return obs
         # elif self.config.env.env_mode == "multi_env":

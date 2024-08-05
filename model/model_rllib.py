@@ -48,6 +48,7 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
             is_bias = cfg["is_bias"] if "is_bias" in cfg else True  # bias in MHA linear layers (W_q, W_k, W_v)
             use_residual_in_decoder = cfg["use_residual_in_decoder"] if "use_residual_in_decoder" in cfg else True
             use_FNN_in_decoder = cfg["use_FNN_in_decoder"] if "use_FNN_in_decoder" in cfg else True
+            self.scale_factor = cfg["scale_factor"] if "scale_factor" in cfg else 1.0
 
             if use_residual_in_decoder != use_FNN_in_decoder:
                 warning_text = "Warning: use_residual_in_decoder != use_FNN_in_decoder; may cause unexpected behavior"
@@ -201,7 +202,7 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
 
         # Attention schore scaling: tune this parameter..!
         # scale_factor = 5e-3
-        scale_factor = 1.0
+        scale_factor = self.scale_factor
         attention_scores *= scale_factor
 
         # Self-loops: fill diag with large positive values
@@ -228,38 +229,4 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
         assert self.values is not None, "self.values is None"  # TODO: remove these assertions, once stable
         assert self.values.dim() == 2, "self.values.dim() != 2; NOT 2D"
         value = self.value_branch(self.values).squeeze(-1)  # (batch_size,)
-        return value
-
-
-class LazyListenerModelPPOTest(TorchModelV2, nn.Module):
-    def __init__(self, obs_space, action_space, num_outputs, model_config, name, **kwargs):
-        nn.Module.__init__(self)  # Initialize nn.Module first
-        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
-
-        # Get actor
-        # assert obs_space["centralized_agents_info"].shape[2] == 4, "d_subobs is not 4"
-        # self.actor = ActorTest(obs_space["centralized_agents_info"].shape[2])
-        self.actor = ActorTest(4)
-
-        # Get critic
-        # self.critic = CriticTest(obs_space["centralized_agents_info"].shape[2])
-        self.critic = CriticTest(4)
-        self.values = None
-
-    def forward(
-            self,
-            input_dict,
-            state: List[TensorType],
-            seq_lens: TensorType
-    ) -> (TensorType, List[TensorType]):
-        # Get and check the observation
-        obs_dict = input_dict["obs"]
-
-        x = self.actor(obs_dict)  # (batch_size, num_agents_max * num_agents_max * 2)
-        self.values = self.critic(obs_dict)  # (batch_size, 1)
-
-        return x, state
-
-    def value_function(self) -> TensorType:
-        value = self.values.squeeze(-1)  # (batch_size,)
         return value
