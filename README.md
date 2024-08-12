@@ -21,7 +21,7 @@
 - [x] ~~Build model~~
   - [x] ~~lazy listener~~
   - [x] ~~lazy controller~~
-- [ ] Env & Model Updated: local comm integrated ~~(took a lot of time, fkin'H)~~
+- [x] Env & Model Updated: local comm integrated ~~(took a lot of time, fkin'H)~~
 - [ ] Hyperparam tuning
 - [ ] Train and save the model
 - [ ] Evaluate the model
