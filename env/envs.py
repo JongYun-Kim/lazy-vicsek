@@ -652,15 +652,13 @@ class LazyVicsekEnv(gym.Env):
         # v = rel_vel[active_agents_indices_2d]  # (num_agents, num_agents, 2)
         th = rel_ang[active_agents_indices_2d]  # (num_agents, num_agents)
         # th_i = abs_ang[padding_mask]  # (num_agents, )
-        net = neighbor_masks[active_agents_indices_2d]  # (num_agents, num_agents) may be no self-loops (i.e. 0 on diag)
+        net = neighbor_masks[active_agents_indices_2d]  # (num_agents, num_agents) might: no self-loops (i.e. 0 on diag)
         n = (net + (np.eye(self.num_agents) * np.finfo(float).eps)).sum(axis=1)  # (num_agents, )
-        # TODO: Do you need n?
 
         # Get control for Vicsek Model
         relative_heading_network_filtered = th * net  # (num_agents, num_agents)
         average_heading = relative_heading_network_filtered.sum(axis=1) / n  # (num_agents, )
         average_heading_rate = average_heading / self.config.env.dt  # (num_agents, )
-        # TODO: Does this avg_heading_rate really give the desired heading rate?
 
         # Get control config
         u_max = self.config.control.max_turn_rate

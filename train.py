@@ -23,9 +23,9 @@ if __name__ == "__main__":
     my_config.env.alignment_goal = 0.97
     my_config.env.alignment_rate_goal = 0.02
     my_config.env.use_fixed_episode_length = True
-    my_config.env.comm_range = 8
+    my_config.env.comm_range = 10
     # env-control config:
-    my_config.control.speed = 4.0
+    my_config.control.speed = 5.0
     my_config.control.initial_position_bound = 100.0
     my_config.control.max_turn_rate = 1e3  # classical Vicsek models adopt particle dynamics
 
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     # train
     tune.run(
         "PPO",
-        name="debugging0731",
+        name="debugging0812",
         # name="infolazy_vicsek_0729",
         # resume=True,
         # stop={"episode_reward_mean": -101},

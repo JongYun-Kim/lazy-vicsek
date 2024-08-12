@@ -7,8 +7,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# Custom modules
-
 
 class LazyVicsekListener(nn.Module):
     def __init__(self, src_embed, encoder, decoder, generator, d_embed_context):
@@ -79,7 +77,6 @@ class LazyVicsekListener(nn.Module):
         :param is_from_my_env:   (batch_size,)
         :return: sub_att_scores: (batch_size, num_agents_max)
         """
-        assert local_agent_info.shape[2] == self.d_v  # TODO: remove this line after debugging
 
         # Get data
         src = local_agent_info  # (batch_size, num_agents_max, d_v)

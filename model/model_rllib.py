@@ -187,7 +187,7 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
         # batch_size = h_c_N.shape[0]
         # if batch_size != 32 and batch_size !=1:
         #     print(f"batch_size = {batch_size}")
-        #     print("stopped for a debuggin purpose")
+        #     print("stopped for debugging purposes")
 
         return x, state
 
@@ -201,13 +201,15 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
         num_agents_max = attention_scores.shape[1]
 
         # Attention schore scaling: tune this parameter..!
-        # scale_factor = 5e-3
+        # scale_factor = 5e-3 or 5e-1
+        # Warning: this also scales the masked values from the MHA layer (1e9 * scale_factor > 1e2)
         scale_factor = self.scale_factor
         attention_scores *= scale_factor
 
         # Self-loops: fill diag with large positive values
+        # attention_scores 에서 음수(incl masked vals) 일수록 안선택, 양수 일수록 선택
         large_val = 1e9
-        attention_scores = attention_scores - torch.diag_embed(attention_scores.new_full((num_agents_max,), large_val))
+        attention_scores = attention_scores + torch.diag_embed(attention_scores.new_full((num_agents_max,), large_val))
 
         # Get negated attention scores
         negated_attention_scores = -attention_scores
@@ -218,7 +220,7 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
 
         # Concatenate them in the last dimension
         # z_concatenated: (batch_size, num_agents_max, num_agents_max, 2)
-        z_concatenated = torch.cat((z_expanded, z_neg_expanded), dim=-1)
+        z_concatenated = torch.cat((z_neg_expanded, z_expanded), dim=-1)
 
         # Reshape the tensor to 2D: (batch_size, num_agents_max * num_agents_max * 2)
         logits = z_concatenated.reshape(batch_size, num_agents_max * num_agents_max * 2)
@@ -226,7 +228,7 @@ class LazyVicsekModelPPO(TorchModelV2, nn.Module):
         return logits  # (batch_size, num_agents_max * num_agents_max * 2)
 
     def value_function(self) -> TensorType:
-        assert self.values is not None, "self.values is None"  # TODO: remove these assertions, once stable
-        assert self.values.dim() == 2, "self.values.dim() != 2; NOT 2D"
+        # assert self.values is not None, "self.values is None"  # TODO: remove these assertions, once stable
+        # assert self.values.dim() == 2, "self.values.dim() != 2; NOT 2D"
         value = self.value_branch(self.values).squeeze(-1)  # (batch_size,)
         return value
