@@ -1,15 +1,12 @@
 import numpy as np
-from env.envs import LazyVicsekEnv, load_config, config_to_env_input
-import matplotlib.pyplot as plt
-
 # Envs and models
-from env.envs import LazyVicsekEnv
+from env.envs import LazyVicsekEnv, load_config, config_to_env_input
 from model.model_rllib import LazyVicsekModelPPO
-#
 # RLlib from Ray
 from ray.rllib.policy.policy import Policy
 from ray.tune.registry import register_env
 from ray.rllib.models import ModelCatalog
+
 
 # Model settings
 model_name = "vicsek_lazy_listener"
@@ -67,7 +64,7 @@ for seed in range(num_seeds):
     while not done:
         step += 1
         action = env.get_vicsek_action()
-        action2, _, action2_info = policy.compute_single_action(obs, explore=True)
+        action2, _, action2_info = policy.compute_single_action(obs, explore=True)  # didn't control torch seed.. my bad
         info_usage = (action2.sum()-num_agents)/(action.sum()-num_agents)
         info_usage_hist_rl[seed, step-1] = info_usage
         obs, reward, done, info = env.step(action2)
@@ -97,10 +94,10 @@ for seed in range(num_seeds):
 
 # save
 np.savez('../../data/240814/240814_RL.npz',
-         episode_reward_rL=episode_reward_rl,  # (num_seeds,)
-         episode_length_rL=episode_length_rl,  # (num_seeds,)
-         alignment_hists_rL=alignment_hist_rl,  # (num_seeds * max_time_steps)
-         info_usage_hists_rL=info_usage_hist_rl)  # (num_seeds * max_time_steps)
+         episode_reward_rl=episode_reward_rl,  # (num_seeds,)
+         episode_length_rl=episode_length_rl,  # (num_seeds,)
+         alignment_hists_rl=alignment_hist_rl,  # (num_seeds * max_time_steps)
+         info_usage_hists_rl=info_usage_hist_rl)  # (num_seeds * max_time_steps)
 np.savez('../../data/240814/240814_Vicsek.npz',
          episode_reward_vicsek=episode_reward_vicsek,  # (num_seeds,)
          episode_length_vicsek=episode_length_vicsek,  # (num_seeds,)
