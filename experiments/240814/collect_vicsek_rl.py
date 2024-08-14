@@ -13,10 +13,16 @@ model_name = "vicsek_lazy_listener"
 ModelCatalog.register_custom_model(model_name, LazyVicsekModelPPO)
 
 # Policy settings
+ckp_num = '0059'
 base_path = "C:/Users/Jelly/ray_results/debugging0812"
 trial_path = base_path + "/PPO_vicsek_lazy_env_75b51_00000_0_2024-08-12_21-42-59"
-checkpoint_path = trial_path + "/checkpoint_000029/policies/default_policy"
-policy = Policy.from_checkpoint(checkpoint_path)
+checkpoint_path = trial_path + f"/checkpoint_00{ckp_num}/policies/default_policy"
+try:
+    policy = Policy.from_checkpoint(checkpoint_path)
+except FileNotFoundError:
+    print("File not found. Please check the checkpoint number.")
+    print(f"checkpoint_path: {checkpoint_path}")
+    exit()
 policy.model.eval()
 
 default_config_path = "D:/pych_ws/lazy-vicsek/env_config_train.yaml"
@@ -93,12 +99,12 @@ for seed in range(num_seeds):
     print(f"Seed {seed+1}/{num_seeds}: R: {reward_sum}, L: {env.time_step}, S/F: {episode_success_mask_vicsek[seed]}, Info: {info_usage_hist_vicsek[seed, :env.time_step].mean()}")
 
 # save
-np.savez('../../data/240814/240814_RL.npz',
+np.savez(f'../../data/240814/240814_RL_ckp{ckp_num}.npz',
          episode_reward_rl=episode_reward_rl,  # (num_seeds,)
          episode_length_rl=episode_length_rl,  # (num_seeds,)
          alignment_hists_rl=alignment_hist_rl,  # (num_seeds * max_time_steps)
          info_usage_hists_rl=info_usage_hist_rl)  # (num_seeds * max_time_steps)
-np.savez('../../data/240814/240814_Vicsek.npz',
+np.savez(f'../../data/240814/240814_Vicsek_ckp{ckp_num}.npz',
          episode_reward_vicsek=episode_reward_vicsek,  # (num_seeds,)
          episode_length_vicsek=episode_length_vicsek,  # (num_seeds,)
          alignment_hists_vicsek=alignment_hist_vicsek,  # (num_seeds * max_time_steps)
