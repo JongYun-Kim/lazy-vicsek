@@ -4,7 +4,7 @@ import os
 
 # Load the data
 ckp_num = '0091'
-date_str = '240817'
+date_str = '240818'
 exp_num = 1
 rl_path = f'../../data/{date_str}/{date_str}_RL_ckp{ckp_num}_{exp_num}.npz'
 vicsek_path = f'../../data/{date_str}/{date_str}_Vicsek_ckp{ckp_num}_{exp_num}.npz'
@@ -87,29 +87,31 @@ plt.savefig(f'{sv_dir}/{date_str}_avg_info_util_ratio.png')
 plt.show()
 
 # 4. Information Utilization Ratio Over Time
-for seed in range(num_seeds):
-    info_util_ratio_at_seed_rl = info_util_ratio_rl[seed, :]
-    info_util_ratio_at_seed_vicsek = info_util_ratio_vicsek[seed, :]
+for seed_idx, seed_ in enumerate(seeds):
+    seed = int(seed_)
+    info_util_ratio_at_seed_rl = info_util_ratio_rl[seed_idx, :]
+    info_util_ratio_at_seed_vicsek = info_util_ratio_vicsek[seed_idx, :]
     time = np.arange(0, len(info_util_ratio_at_seed_rl) * 0.1, 0.1)
 
     plt.figure(figsize=(10, 6))
     plt.grid(True)
     plt.plot(time, info_util_ratio_at_seed_vicsek, label='Vicsek', color='tab:blue', linewidth=3, linestyle='--')
     plt.plot(time, info_util_ratio_at_seed_rl, label='RL', color='tab:green', linewidth=1.5)
-    plt.title(f'Information Utilization Ratio Over Time (seed={seeds[seed]})')
+    plt.title(f'Information Utilization Ratio Over Time (seed={seed})')
     plt.xlabel('Time (s)')
     plt.ylabel('Information Utilization Ratio')
     plt.xlim(0, max_time_steps * 0.1)
     plt.ylim(0, 1.03)
     plt.legend()
-    plt.savefig(f'{sv_dir}/{date_str}_s{seeds[seed]}_info_util_ratio.png')
+    plt.savefig(f'{sv_dir}/{date_str}_s{seed}_info_util_ratio.png')
     # plt.show()
     plt.close()
 
 # 5. Order Parameter Over Time
-for seed in range(num_seeds):
-    order_param_hist_at_seed_rl = order_parameter_rl[seed, :]
-    order_param_hist_at_seed_vicsek = order_parameter_vicsek[seed, :]
+for seed_idx, seed_ in enumerate(seeds):
+    seed = int(seed_)
+    order_param_hist_at_seed_rl = order_parameter_rl[seed_idx, :]
+    order_param_hist_at_seed_vicsek = order_parameter_vicsek[seed_idx, :]
     time = np.arange(0, len(order_param_hist_at_seed_rl) * 0.1, 0.1)
 
     plt.figure(figsize=(10, 6))
