@@ -1,0 +1,79 @@
+{
+  "clip_param": 0.22,
+  "env": "vicsek_lazy_env",
+  "env_config": {
+    "config": {
+      "control": {
+        "initial_position_bound": 100.0,
+        "max_turn_rate": 1000.0,
+        "speed": 5.0
+      },
+      "env": {
+        "action_type": "binary_vector",
+        "agent_name_prefix": "agent_",
+        "alignment_goal": 0.97,
+        "alignment_rate_goal": 0.02,
+        "alignment_window_length": 32,
+        "comm_range": 10,
+        "dt": 0.1,
+        "env_mode": "single_env",
+        "get_action_hist": false,
+        "get_state_hist": false,
+        "ignore_comm_lost_agents": true,
+        "max_time_steps": 300,
+        "num_agents_pool": [
+          20
+        ],
+        "obs_dim": 6,
+        "periodic_boundary": true,
+        "seed": null,
+        "std_p_goal": null,
+        "std_p_rate_goal": 0.1,
+        "std_v_goal": 0.1,
+        "std_v_rate_goal": 0.2,
+        "use_fixed_episode_length": true
+      }
+    },
+    "seed_id": null
+  },
+  "framework": "torch",
+  "gamma": 0.992,
+  "grad_clip": 0.5,
+  "kl_coeff": 0,
+  "kl_target": 0.01,
+  "lambda": 0.96,
+  "lr": 4e-05,
+  "model": {
+    "custom_model": "vicsek_lazy_listener",
+    "custom_model_config": {
+      "d_embed_context": 256,
+      "d_embed_input": 256,
+      "d_ff": 512,
+      "d_ff_decoder": 512,
+      "d_model": 256,
+      "d_model_decoder": 256,
+      "d_subobs": 6,
+      "dr_rate": 0,
+      "is_bias": false,
+      "n_layers_decoder": 1,
+      "n_layers_encoder": 3,
+      "norm_eps": 1e-05,
+      "num_heads": 8,
+      "scale_factor": 0.05,
+      "share_layers": false,
+      "use_FNN_in_decoder": true,
+      "use_residual_in_decoder": true
+    }
+  },
+  "num_envs_per_worker": 2,
+  "num_gpus": 1,
+  "num_sgd_iter": 8,
+  "num_workers": 12,
+  "rollout_fragment_length": 600,
+  "sgd_minibatch_size": 256,
+  "train_batch_size": 14400,
+  "use_critic": true,
+  "use_gae": true,
+  "vf_clip_param": 256,
+  "vf_loss_coeff": 0.25
+}
