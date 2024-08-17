@@ -26,13 +26,6 @@ import yaml
 
 class ControlConfig(BaseModel):
     speed: float = 15.0  # Speed in m/s.
-    # predefined_distance: float = 60.0  # Predefined distance in meters.
-    # communication_decay_rate: float = 1/3  # Communication decay rate.
-    # cost_weight: float = 1.0  # Cost weight.
-    # inter_agent_strength: float = 5.0  # Inter agent strength.
-    # bonding_strength: float = 1.0  # Bonding strength.
-    # k1: float = 1.0  # K1 coefficient.
-    # k2: float = 3.0  # K2 coefficient.
     max_turn_rate: float = 1e3  # Maximum turn rate in rad/s.
     initial_position_bound: float = 250.0  # Initial position bound in meters.
 
@@ -43,16 +36,10 @@ class LazyVicsekEnvConfig(BaseModel):
     agent_name_prefix: str = 'agent_'
     env_mode: str = 'single_env'
     action_type: str = 'binary_vector'
-    # num_agents_pool: conlist(conint(ge=1), min_length=1)  # Must clarify it !!
     num_agents_pool: List[conint(ge=1)]  # Must clarify it !!
     dt: float = 0.1
     comm_range: Optional[float] = None
     max_time_steps: int = 200
-    # std_p_goal will be set dynamically
-    std_p_goal: Optional[float] = None
-    std_v_goal: float = 0.1
-    std_p_rate_goal: float = 0.1
-    std_v_rate_goal: float = 0.2
     alignment_goal: float = 0.97
     alignment_rate_goal: float = 0.03
     alignment_window_length: int = 32
@@ -356,10 +343,6 @@ class LazyVicsekEnv(gym.Env):
 
         # Get obs
         obs = self.get_obs(state=self.state, rel_state=self.rel_state, control_inputs=np.zeros(self.num_agents_max))
-
-        # # Std
-        # self.std_pos_hist = np.zeros(self.config.env.max_time_steps)
-        # self.std_vel_hist = np.zeros(self.config.env.max_time_steps)
 
         # Alignment
         self.alignment_hist = np.zeros(self.config.env.max_time_steps)
@@ -665,90 +648,6 @@ class LazyVicsekEnv(gym.Env):
 
         # 3. Saturation
         u_active = np.clip(average_heading_rate, -u_max, u_max)  # (num_agents, )
-
-        # 4. Padding
-        u = np.zeros(self.num_agents_max, dtype=np.float32)  # (num_agents_max, )
-        u[padding_mask] = u_active  # (num_agents_max, )
-
-        return u
-
-    def get_acs_control(self, state, rel_state, new_network):
-        """
-        Get the control inputs based on the agent states using the Augmented Cucker-Smale Model
-        :return: u (num_agents_max)
-        """
-        # Please Work with Active Agents Only
-
-        # Get rel_pos, rel_dist, rel_vel, rel_ang, abs_ang, padding_mask, neighbor_masks
-        rel_pos = rel_state["rel_agent_positions"]  # (num_agents_max, num_agents_max, 2)
-        rel_dist = rel_state["rel_agent_dists"]  # (num_agents_max, num_agents_max)
-        rel_vel = rel_state["rel_agent_velocities"]  # (num_agents_max, num_agents_max, 2)
-        rel_ang = rel_state["rel_agent_headings"]  # (num_agents_max, num_agents_max)
-        abs_ang = state["agent_states"][:, 4]  # (num_agents_max, )
-        padding_mask = state["padding_mask"]  # (num_agents_max)
-        neighbor_masks = new_network  # (num_agents_max, num_agents_max)
-
-        # Get data of the active agents
-        active_agents_indices = np.nonzero(padding_mask)[0]  # (num_agents, )
-        active_agents_indices_2d = np.ix_(active_agents_indices, active_agents_indices)  # (num_agents,num_agents)
-        p = rel_pos[active_agents_indices_2d]  # (num_agents, num_agents, 2)
-        r = rel_dist[active_agents_indices_2d] + (
-                    np.eye(self.num_agents) * np.finfo(float).eps)  # (num_agents, num_agents)
-        v = rel_vel[active_agents_indices_2d]  # (num_agents, num_agents, 2)
-        th = rel_ang[active_agents_indices_2d]  # (num_agents, num_agents)
-        th_i = abs_ang[padding_mask]  # (num_agents, )
-        net = neighbor_masks[active_agents_indices_2d]  # (num_agents, num_agents) may be no self-loops (i.e. 0 on diag)
-        N = (net + (np.eye(self.num_agents) * np.finfo(float).eps)).sum(axis=1)  # (num_agents, )
-
-        # Get control config
-        beta = self.config.control.communication_decay_rate
-        lam = self.config.control.inter_agent_strength
-        k1 = self.config.control.k1
-        k2 = self.config.control.k2
-        spd = self.config.control.speed
-        u_max = self.config.control.max_turn_rate
-        r0 = self.config.control.predefined_distance
-        sig = self.config.control.bonding_strength
-
-        # 1. Compute Alignment Control Input
-        # # u_cs = (lambda/n(N_i)) * sum_{j in N_i}[ psi(r_ij)sin(θ_j - θ_i) ],
-        # # where N_i is the set of neighbors of agent i,
-        # # psi(r_ij) = 1/(1+r_ij^2)^(beta),
-        # # r_ij = ||X_j - X_i||, X_i = (x_i, y_i),
-        psi = (1 + r ** 2) ** (-beta)  # (num_agents, num_agents)
-        alignment_error = np.sin(th)  # (num_agents, num_agents)
-        u_cs = (lam / N) * (psi * alignment_error * net).sum(axis=1)  # (num_agents, )
-
-        # 2. Compute Cohesion and Separation Control Input
-        # # u_coh[i] = (sigma/N*V)
-        # #            * sum_(j in N_i)
-        # #               [
-        # #                   {
-        # #                       (K1/(2*r_ij^2))*<-rel_vel, -rel_pos> + (K2/(2*r_ij^2))*(r_ij-R)
-        # #                   }
-        # #                   * <[-sin(θ_i), cos(θ_i)]^T, rel_pos>
-        # #               ]
-        # # where N_i is the set of neighbors of agent i,
-        # # r_ij = ||X_j - X_i||, X_i = (x_i, y_i),
-        # # rel_vel = (vx_j - vx_i, vy_j - vy_i),
-        # # rel_pos = (x_j - x_i, y_j - y_i),
-        sig_NV = sig / (N * spd)  # (num_agents, )
-        k1_2r2 = k1 / (2 * r ** 2)  # (num_agents, num_agents)
-        k2_2r = k2 / (2 * r)  # (num_agents, num_agents)
-        v_dot_p = np.einsum('ijk,ijk->ij', v, p)  # (num_agents, num_agents)
-        r_minus_r0 = r - r0  # (num_agents, num_agents)
-        # below dir_vec and dir_dot_p in the commented lines are the old way of computing the dot product
-        # dir_vec = np.stack([-np.sin(th_i), np.cos(th_i)], axis=1)  # (num_agents, 2)
-        # dir_vec = np.tile(dir_vec[:, np.newaxis, :], (1, self.num_agents, 1))  # (num_agents, num_agents, 2)
-        # dir_dot_p = np.einsum('ijk,ijk->ij', dir_vec, p)  # (num_agents, num_agents)
-        sin_th_i = -np.sin(th_i)  # (num_agents, )
-        cos_th_i = np.cos(th_i)  # (num_agents, )
-        dir_dot_p = sin_th_i[:, np.newaxis] * p[:, :, 0] + cos_th_i[:, np.newaxis] * p[:, :,
-                                                                                     1]  # (num_agents, num_agents)
-        u_coh = sig_NV * np.sum((k1_2r2 * v_dot_p + k2_2r * r_minus_r0) * dir_dot_p * net, axis=1)  # (num_agents, )
-
-        # 3. Saturation
-        u_active = np.clip(u_cs + u_coh, -u_max, u_max)  # (num_agents, )
 
         # 4. Padding
         u = np.zeros(self.num_agents_max, dtype=np.float32)  # (num_agents_max, )
