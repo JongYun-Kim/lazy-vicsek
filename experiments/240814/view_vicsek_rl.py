@@ -18,7 +18,7 @@ except FileNotFoundError:
     exit()
 
 # Make dir under data folder with the name of ckp_num
-sv_dir = f'../../data/{date_str}/figs/{ckp_num}'
+sv_dir = f'../../data/{date_str}/figs/{ckp_num}_{exp_num}'
 os.makedirs(sv_dir, exist_ok=True)
 
 episodic_reward_rl = data_rl['episode_reward_rl']    # (num_seeds,)
@@ -71,7 +71,7 @@ plt.show()
 # 2. Average Order Parameter at t=50s
 plt.figure(figsize=(8, 6))
 plt.bar(['Vicsek', 'RL'], [avg_last_alignment_vicsek, avg_last_alignment_rl], color=['tab:blue', 'tab:green'], width=bar_width, hatch=['/', ''], zorder=3)
-plt.title(f'Average Order Parameter at t=50s ({num_seeds} experiments)')
+plt.title(f'Average Order Parameter at t={max_time_steps*0.1}s ({num_seeds} experiments)')
 plt.ylabel('Average Order Parameter')
 plt.grid(axis='y', zorder=0)
 plt.savefig(f'{sv_dir}/{date_str}_avg_order_parameter.png')
@@ -125,5 +125,28 @@ for seed in range(num_seeds):
     plt.savefig(f'{sv_dir}/{date_str}_s{seed}_order_parameter.png')
     # plt.show()
     plt.close()
+
+# 6. Print out comparison of the averages: Vicsek vs RL
+print("-" * 32)
+print(f"Mean episode reward of classical Vicsek policy: {avg_episode_reward_vicsek}")
+print(f"Mean episode reward of RL policy: {avg_episode_reward_rl}")
+print("-" * 32)
+print(f"Average last alignment of classical Vicsek policy: {avg_last_alignment_vicsek}")
+print(f"Average last alignment of RL policy: {avg_last_alignment_rl}")
+print("-" * 32)
+print(f"Average information utilization ratio of classical Vicsek policy: {avg_info_usage_vicsek}")
+print(f"Average information utilization ratio of RL policy: {avg_info_usage_rl}")
+print("-" * 32)
+# save the averages in a text file
+with open(f'{sv_dir}/{date_str}_averages.txt', 'w') as f:
+    f.write(f"Mean episode reward of classical Vicsek policy: {avg_episode_reward_vicsek}\n")
+    f.write(f"Mean episode reward of RL policy: {avg_episode_reward_rl}\n")
+    f.write("-" * 32 + '\n')
+    f.write(f"Average last alignment of classical Vicsek policy: {avg_last_alignment_vicsek}\n")
+    f.write(f"Average last alignment of RL policy: {avg_last_alignment_rl}\n")
+    f.write("-" * 32 + '\n')
+    f.write(f"Average information utilization ratio of classical Vicsek policy: {avg_info_usage_vicsek}\n")
+    f.write(f"Average information utilization ratio of RL policy: {avg_info_usage_rl}\n")
+    f.write("-" * 32 + '\n')
 
 print("Done!")
