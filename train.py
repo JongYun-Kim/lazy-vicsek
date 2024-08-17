@@ -19,7 +19,7 @@ if __name__ == "__main__":
     my_config = load_config(default_config_path)
     # env-env config:
     my_config.env.num_agents_pool = [20]
-    my_config.env.max_time_steps = 500
+    my_config.env.max_time_steps = 300
     my_config.env.alignment_goal = 0.97
     my_config.env.alignment_rate_goal = 0.02
     my_config.env.use_fixed_episode_length = True
@@ -41,10 +41,10 @@ if __name__ == "__main__":
     custom_model_config = {
         "share_layers": False,
         "d_subobs": 6,
-        "d_embed_input": 128,
-        "d_embed_context": 128,
-        "d_model": 128,
-        "d_model_decoder": 128,
+        "d_embed_input": 256,
+        "d_embed_context": 256,
+        "d_model": 256,
+        "d_model_decoder": 256,
         "n_layers_encoder": 3,
         "n_layers_decoder": 1,
         "num_heads": 8,
@@ -55,7 +55,7 @@ if __name__ == "__main__":
         "is_bias": False,  # Default is False, but True used in LazyControl
         "use_residual_in_decoder": True,
         "use_FNN_in_decoder": True,
-        "scale_factor": 1e-3,
+        "scale_factor": 0.05,
     }
 
     # register your custom model
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     # train
     tune.run(
         "PPO",
-        name="debugging0812",
+        name="lazyvicsek0815",
         # name="infolazy_vicsek_0729",
         # resume=True,
         # stop={"episode_reward_mean": -101},
@@ -89,13 +89,13 @@ if __name__ == "__main__":
             "num_gpus": 1,
             "num_workers": 12,
             "num_envs_per_worker": 2,
-            "rollout_fragment_length": 500,
-            "train_batch_size": 500*24,
+            "rollout_fragment_length": 600,
+            "train_batch_size": 600*24,
             "sgd_minibatch_size": 256,
-            "num_sgd_iter": 10,
+            "num_sgd_iter": 8,
             # "batch_mode": "complete_episodes",
             # "batch_mode": "truncate_episodes",
-            "lr": 2e-5,
+            "lr": 4e-5,
             # "lr_schedule": [[0, 2e-5],
             #                 [1e7, 1e-7],
             #                 ],
@@ -105,7 +105,7 @@ if __name__ == "__main__":
             "use_critic": True,
             "use_gae": True,
             "gamma": 0.992,
-            "lambda": 0.95,
+            "lambda": 0.96,
             "kl_coeff": 0,  # no PPO penalty term; we use PPO-clip anyway; if none zero, be careful Nan in tensors!
             # "entropy_coeff": tune.grid_search([0, 0.001, 0.0025, 0.01]),
             # "entropy_coeff_schedule": None,
@@ -117,7 +117,7 @@ if __name__ == "__main__":
             #                            [1e6, 0.0001],
             #                            [2e6, 0],
             #                            ],
-            "clip_param": 0.2,  # 0.3
+            "clip_param": 0.22,  # 0.3
             "vf_clip_param": 256,
             # "grad_clip": None,
             "grad_clip": 0.5,

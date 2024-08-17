@@ -22,13 +22,13 @@
   - [x] ~~lazy listener~~
   - [x] ~~lazy controller~~
 - [x] ~~Env & Model Updated: local comm integrated~~
-- [ ] Hyperparam tuning
-- [ ] Train and save the model
-- [ ] Evaluate the model
-  - [ ] Average performance in the base environment (validation)
+- [x] ~~Hyperparam tuning~~
+- [x] ~~Train and save the model~~
+- [x] Evaluate the model
+  - [x] Average performance in the base environment (validation)
   - [ ] Noise test (test)
   - [ ] Scalability
-- [ ] Collect data
+- [x] ~~Collect data~~
 - [ ] Save data
 - [ ] Data representation
 
