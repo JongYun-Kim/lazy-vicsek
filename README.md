@@ -13,11 +13,9 @@
   - [x] ~~./utils~~
   - [x] ~~./data~~
   - [x] ~~./experiments~~
-- [x] Create an environment file
-  - Less abstractions but quicker! just like before
-  - But how are you going to deal with Laziest models (i.e. both lazy listenr and controller) ???
-    - idk...
-    - Thesis first and then go for 
+- [x] ~~Create an environment file~~
+  - [x] ~~LazyVicsekEnv~~
+  - [x] ~~LazyVicsekEnvConfig~~; ~~config using pydantic~~
 - [x] ~~Build model~~
   - [x] ~~lazy listener~~
   - [x] ~~lazy controller~~
@@ -25,12 +23,13 @@
 - [x] ~~Hyperparam tuning~~
 - [x] ~~Train and save the model~~
 - [x] Evaluate the model
-  - [x] Average performance in the base environment (validation)
+  - [x] ~~Average performance in the base environment (validation)~~
+  - [x] ~~Order parameter changes over time~~
   - [ ] Noise test (test)
   - [ ] Scalability
 - [x] ~~Collect data~~
-- [ ] Save data
-- [ ] Data representation
+- [x] ~~Save data~~
+- [x] ~~Data representation~~
 
 
 ## Assumptions
@@ -46,3 +45,9 @@
   - Sub-logits are concatenated to form the final logits (believe RLlib updates the model accordingly; PPO updates are pretty simple!)
   - Action distribution: Multi-Binary (implemented by Multi-MultiBinomial with two actions to facilitate the built-in RLlib ActionDistribution)
 -
+
+## Dependencies (see requirements.txt)
+- gym==0.23.1        # not gymnasium
+- ray==2.1.0         # uses gym
+- pydantic==1.10.13  # not V2.x.x
+- Python 3.9.x

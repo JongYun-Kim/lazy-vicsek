@@ -150,7 +150,7 @@ def main():
             state_hist_vicsek[seed_idx, :env.time_step, :, :] = env.agent_states_hist
             network_hist_vicsek[seed_idx, :env.time_step, :, :] = env.neighbor_masks_hist
             action_hist_vicsek[seed_idx, :env.time_step, :, :] = env.action_hist
-        print(f"[{100*(seed_idx+1)/num_seeds:.0f}%] Seed {seed} in [{start_seed}, {last_seed}] : R: {reward_sum:.2f}, L: {env.time_step}, S/F: {episode_success_mask_vicsek[seed_idx]}, Info: {info_usage_hist_vicsek[seed_idx, :env.time_step].mean()}")
+        print(f"[{100*(seed_idx+1)/num_seeds:.0f}%] Seed {seed} in [{start_seed}, {last_seed}]: R: {reward_sum:.2f}, L: {env.time_step}, S/F: {episode_success_mask_vicsek[seed_idx]}, Info: {info_usage_hist_vicsek[seed_idx, :env.time_step].mean()}")
 
     print("-" * 32)
     print("-" * 32)
