@@ -160,8 +160,12 @@ def main():
     print(f"Mean last order parameter of VS policy: {alignment_hist_vicsek[:, -1].mean():.4f}")
     print(f"Mean last order parameter of RL policy: {alignment_hist_rl[:, -1].mean():.4f}")
     print("-" * 32)
-    print(f"Mean information utilization ratio of VS policy: {info_usage_hist_vicsek.mean():.4f}")
-    print(f"Mean information utilization ratio of RL policy: {info_usage_hist_rl.mean():.4f}")
+    print(f"Mean information utilization ratio of VS policy: {np.nanmean(info_usage_hist_vicsek):.4f}")
+    print(f"Mean information utilization ratio of RL policy: {np.nanmean(info_usage_hist_rl):.4f}")
+    if np.isnan(info_usage_hist_rl).any():
+        print("    Warning: RL info usage contains NaN values.")
+        nan_indices = np.argwhere(np.isnan(info_usage_hist_rl))
+        print("        NaN indices: ", nan_indices)
     print("-" * 32)
     print("-" * 32)
 
