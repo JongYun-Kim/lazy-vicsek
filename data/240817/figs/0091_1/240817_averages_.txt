@@ -1,0 +1,9 @@
+Mean episode reward of classical Vicsek policy: 244.37197479800267
+Mean episode reward of RL policy: 252.86935782826527
+--------------------------------
+Average order parameter of classical Vicsek policy: 0.965593159198761
+Average order parameter of RL policy: 0.9711222052574158
+--------------------------------
+Average information utilization ratio of classical Vicsek policy: 1.0
+Average information utilization ratio of RL policy: 0.4742332696914673
+--------------------------------
