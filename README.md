@@ -1,7 +1,7 @@
 # lazy-vicsek
 
 
-## Environment settings
+## Environment Settings
 | Parameter                    | Value   |
 |------------------------------|---------|
 | Time step length (Δt)         | 0.1 s   |
@@ -28,7 +28,7 @@
 | Learning rate               | 1e-4    |
 | Optimizer                   | Adam    |
 
-## Network settings
+## Network Settings
 | Parameter                                 | Value   |
 |-------------------------------------------|---------|
 | share_layers                              | False   |
@@ -45,6 +45,24 @@
 | norm_eps                                  | 1e-5    |
 | bias in attention transformation matrices | False   |
 
+## Network Architecture
+### Actor: Encoder + Decoder + Generator
+- Encoder = Embedding + EncoderLayers
+  - Embedding: `nn.Linear()`, positional encoding not used
+  - EncoderLayers: self-attention encoder-layers
+- Decoder = DecoderLayers
+  - DecoderLayers: cross-attention b/w encoder output embeddings and the context_embedding of the agent
+  - context_embedding: the mean of encoder output embeddings within the agent's network (i.e. local communication)
+- Generator
+  - Computes (raw)attention scores b/w query (decoder output) and key (encoder output)
+  - Preserves the shape of the input tensor, meaning it outputs the same number of outputs as the number of neighbors
+### Action distribution
+- softmax over [-raw_attention_score, raw_attention_score] for each neighbor
+### Critic: Encoder + ValueBranch
+- Encoder: same as the actor's encoder
+- ValueBranch
+  - One hidden layer with ReLU activation
+  - Receives the mean context_embeddings of all agents as global evaluation is required to measure flocking performance
 
 ## Assumptions
 - Centralized _training_ (decentralized-executable tho)
