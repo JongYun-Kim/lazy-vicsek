@@ -34,7 +34,7 @@ class LazyVicsekListener(nn.Module):
 
         batch_size, num_agents_max, _, obs_dim = agent_infos.shape
 
-        # TODO: Currently, padding agents are not supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
+        # TODO: Currently, padding agents are not *fully* supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
 
         # Get sub-attention scores
         att_scores = torch.zeros_like(network, dtype=torch.float32)  # (batch_size, num_agents_max, num_agents_max)
@@ -44,16 +44,17 @@ class LazyVicsekListener(nn.Module):
         for i in range(num_agents_max):  # TODO: [MUST] push agent dim onto batch dim to parallelize
             local_agent_info = agent_infos[:, i, :, :]
             local_network = network[:, i, :]
+            local_padding_flags = padding_mask[:, i]
 
             # sub_att_scores: shape: (batch_size, num_agents_max)
             # h_c_N: shape: (batch_size, 1, d_embed_context)
-            sub_att_scores, _, h_c_N = self.local_forward(local_agent_info, local_network, padding_mask, is_from_my_env)
+            sub_att_scores, _, h_c_N = self.local_forward(local_agent_info, local_network, padding_mask, is_from_my_env, local_padding_flags)
 
             # Get the i-th row of the attention scores
             att_scores[:, i, :] = sub_att_scores
 
             # Accumulate h_c_N values
-            h_c_N_accumulator += h_c_N
+            h_c_N_accumulator += h_c_N  # TODO: 패딩 에이전트는 더해지면 안됨!! 마스크 곱해서 더해야 할 듯 (아직 구현 안됨)
 
         # Calculate average_h_c_N
         num_agents = num_agents.view(-1, 1, 1).float()  # (batch_size, 1, 1)
@@ -69,12 +70,20 @@ class LazyVicsekListener(nn.Module):
     def decode(self, tgt, encoder_out, tgt_mask, src_tgt_mask):
         return self.decoder(tgt, encoder_out, tgt_mask, src_tgt_mask)
 
-    def local_forward(self, local_agent_info, local_network, padding_mask, is_from_my_env):
+    def local_forward(
+            self,
+            local_agent_info,
+            local_network,
+            padding_mask,
+            is_from_my_env,
+            local_padding_flags,
+    ):
         """
         :param local_agent_info: (batch_size, num_agents_max, obs_dim)
         :param local_network:    (batch_size, num_agents_max)
         :param padding_mask:     (batch_size, num_agents_max)
         :param is_from_my_env:   (batch_size,)
+        :param local_padding_flags: (batch_size,)
         :return: sub_att_scores: (batch_size, num_agents_max)
         """
 
@@ -118,6 +127,75 @@ class LazyVicsekListener(nn.Module):
         # h_c_N: (batch_size, 1, d_embed_context)
         return sub_att_scores, decoder_out, h_c_N
 
+    def local_forward_2(
+            self,
+            local_agent_info,
+            local_network,
+            padding_mask,
+            is_from_my_env,
+            local_padding_flags,
+    ):
+        """
+        :param local_agent_info: (batch_size, num_agents_max, obs_dim)
+        :param local_network:    (batch_size, num_agents_max)
+        :param padding_mask:     (batch_size, num_agents_max)
+        :param is_from_my_env:   (batch_size,)
+        :param local_padding_flags: (batch_size,)
+        :return: sub_att_scores: (batch_size, num_agents_max)
+        """
+        batch_size, num_agents_max, obs_dim = local_agent_info.shape
+
+        # Initialize outputs for all sequences
+        decoder_out = torch.zeros(batch_size, 1, self.d_embed_context, device=local_agent_info.device)
+        h_c_N = torch.zeros(batch_size, 1, self.d_embed_context, device=local_agent_info.device)
+        sub_att_scores = torch.full((batch_size, num_agents_max), -1e9, device=local_agent_info.device)
+
+        # Get mask for non-padded sequences
+        non_padded_mask = local_padding_flags.bool()  # (batch_size,)
+
+        if non_padded_mask.any():  # If there is at least one non-padded sequence
+            # Select non-padded sequences
+            local_agent_info_np = local_agent_info[non_padded_mask]  # (n_non_padded, num_agents_max, obs_dim)
+            local_network_np = local_network[non_padded_mask]  # (n_non_padded, num_agents_max)
+            is_from_my_env_np = is_from_my_env[non_padded_mask]  # (n_non_padded,)
+
+            # Masks for non-padded sequences
+            src_mask_tokens = local_network_np.ne(0)  # (n_non_padded, num_agents_max)
+            src_mask_idx = 0
+            src_mask = self.make_src_mask(src_mask_tokens, mask_idx=src_mask_idx)
+            tgt_mask = None
+            context_mask_token = torch.ones_like(src_mask_tokens[:, 0:1], dtype=torch.bool)
+            src_tgt_mask = self.make_src_tgt_mask(src_mask_tokens, context_mask_token, mask_idx=src_mask_idx)
+
+            # Encoding
+            encoder_out = self.encode(local_agent_info_np, src_mask.unsqueeze(1))
+
+            # Context embedding
+            h_c_N_np = self.get_context_vector(
+                embeddings=encoder_out,
+                pad_tokens=~src_mask_tokens,
+                is_from_my_env=is_from_my_env_np,
+                use_embeddings_mask=True,
+                debug=True
+            )  # (n_non_padded, 1, d_embed_context)
+
+            # Decoding
+            decoder_out_np = self.decode(h_c_N_np, encoder_out, tgt_mask, src_tgt_mask.unsqueeze(1))
+
+            # Generator
+            sub_att_scores_np = self.generator(
+                input_query=decoder_out_np,
+                input_key=encoder_out,
+                mask=src_tgt_mask
+            ).squeeze(1)  # (n_non_padded, num_agents_max)
+
+            # Update results for non-padded sequences
+            decoder_out[non_padded_mask] = decoder_out_np
+            h_c_N[non_padded_mask] = h_c_N_np
+            sub_att_scores[non_padded_mask] = sub_att_scores_np
+
+        return sub_att_scores, decoder_out, h_c_N
+
     def get_context_vector(self, embeddings, pad_tokens, is_from_my_env, use_embeddings_mask=True, debug=False):
         # embeddings: shape (batch_size, num_agents_max==seq_len_src, data_size==d_embed_input)
         # pad_tokens: shape (batch_size, num_agents_max==seq_len_src)
@@ -128,11 +206,12 @@ class LazyVicsekListener(nn.Module):
 
         if use_embeddings_mask:  # TODO: Could be way simpler
             # Expand the dimensions of pad_tokens to match the shape of embeddings
+            # # mask==1: padding, mask==0: non-padding
             mask = pad_tokens.unsqueeze(-1).expand_as(embeddings)  # (batch_size, num_agents_max, data_size)
 
             # Replace masked values with zero for the average computation
             # embeddings_masked: (batch_size, num_agents_max, data_size)
-            embeddings_masked = torch.where(mask == 1, embeddings, torch.zeros_like(embeddings))
+            embeddings_masked = torch.where(mask == 0, embeddings, torch.zeros_like(embeddings))
 
             # Compute the sum and count non-zero elements
             embeddings_sum = torch.sum(embeddings_masked, dim=1, keepdim=True)  # (batch_size, 1, data_size)
@@ -140,10 +219,9 @@ class LazyVicsekListener(nn.Module):
 
             # Check if there is any sample where all agents are padded
             if debug:
-                if torch.any(embeddings_count == 0):
-                    if is_from_my_env.sum() == batch_size:  # all samples are from my env but padded
+                if is_from_my_env.dtype == torch.bool:  # if it isn't in the env_check mode
+                    if torch.any(embeddings_count == 0):  # is supposed to never happen due to self-loops
                         raise ValueError("All agents are padded in at least one sample.")
-                    # else:  It's in the env_check mode, so it's okay to have all agents padded.
             # Compute the average embeddings, only for non-masked elements
             embeddings_avg = embeddings_sum / embeddings_count
         else:
@@ -153,7 +231,7 @@ class LazyVicsekListener(nn.Module):
         # Construct context embedding: shape (batch_size, 1, d_embed_context)
         # The resulting tensor, h_c, will have shape (batch_size, 1, d_embed_context)
         # Concatenate the additional info to h_c, if you need more info for the context vector.
-        h_c = embeddings_avg
+        h_c = embeddings_avg  # no concatenation in this project
         # This represents the graph embeddings.
         # It summarizes the information of all nodes in the graph.
 

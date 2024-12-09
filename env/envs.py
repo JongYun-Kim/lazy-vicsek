@@ -126,7 +126,7 @@ class LazyVicsekEnv(gym.Env):
         # # # state: dict := {"agent_states":   ndarray,  # shape (num_agents_max, data_dim); absolute states!!
         #                                        [x, y, vx, vy, theta]; absolute states!!
         #                     "neighbor_masks": ndarray,  # shape (num_agents_max, num_agents_max)
-        #                                        1 if neighbor, 0 if not;  self loop is 0
+        #                                        1 if neighbor, 0 if not;  self-loop is 1 (check your self-loops).
         #                     "padding_mask":   ndarray,  # shape (num_agents_max)
         #                                        1 if agent,    0 if padding
         # # # rel_state: dict := {"rel_agent_positions": ndarray,   # shape (num_agents_max, num_agents_max, 2)
@@ -179,7 +179,7 @@ class LazyVicsekEnv(gym.Env):
                                          dtype=np.float64),
                 "neighbor_masks": Box(low=0, high=1, shape=(self.num_agents_max, self.num_agents_max), dtype=np.bool_),
                 "padding_mask": Box(low=0, high=1, shape=(self.num_agents_max,), dtype=np.bool_),
-                "is_from_my_env": Box(low=0, high=1, shape=(), dtype=np.bool_),
+                "is_from_my_env": Box(low=0, high=2, shape=(), dtype=np.float16),
             })
         elif self.config.env.env_mode == "multi_env":
             self.observation_space = Dict({
