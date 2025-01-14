@@ -24,7 +24,7 @@ class LazyVicsekListener(nn.Module):
         # Custom layers, if needed
         #
 
-    def forward(self, obs_dict: Dict[str, TensorType]):
+    def forward_og(self, obs_dict: Dict[str, TensorType]):
         # Get data
         agent_infos = obs_dict["local_agent_infos"]  # (batch_size, num_agents_max, num_agents_max, obs_dim)
         network = obs_dict["neighbor_masks"]  # (batch_size, num_agents_max, num_agents_max); (:,i,:): i-th agent's net
@@ -48,7 +48,7 @@ class LazyVicsekListener(nn.Module):
 
             # sub_att_scores: shape: (batch_size, num_agents_max)
             # h_c_N: shape: (batch_size, 1, d_embed_context)
-            sub_att_scores, _, h_c_N = self.local_forward(local_agent_info, local_network, padding_mask, is_from_my_env, local_padding_flags)
+            sub_att_scores, _, h_c_N = self.local_forward_og(local_agent_info, local_network, padding_mask, is_from_my_env, local_padding_flags)
 
             # Get the i-th row of the attention scores
             att_scores[:, i, :] = sub_att_scores
@@ -64,13 +64,120 @@ class LazyVicsekListener(nn.Module):
         # average_h_c_N: (batch_size, 1, d_embed_context)
         return att_scores, average_h_c_N
 
+    def forward(self, obs_dict: Dict[str, torch.Tensor]):
+        """
+        Vectorized version of the forward pass that produces
+        identical output ordering to the per-agent for-loop version.
+        """
+        # ------------------------------------------------------------
+        # 1) Unpack the inputs
+        # ------------------------------------------------------------
+        agent_infos = obs_dict["local_agent_infos"]  # (batch_size, num_agents_max, num_agents_max, obs_dim)
+        network = obs_dict["neighbor_masks"]  # (batch_size, num_agents_max, num_agents_max)
+        padding_mask = obs_dict["padding_mask"]  # (batch_size, num_agents_max)
+        is_from_my_env = obs_dict["is_from_my_env"]  # (batch_size,)
+        batch_size, num_agents_max, _, obs_dim = agent_infos.shape
+
+        # Number of (non-padding) agents in each sample
+        num_agents_per_sample = padding_mask.sum(dim=1).int()  # (batch_size,)
+
+        # ------------------------------------------------------------
+        # 2) Permute + reshape so that agent dimension i is “merged” with the batch
+        #
+        #    Original shapes (for each i in [0..num_agents_max]):
+        #      local_agent_info      = (batch_size, num_agents_max, obs_dim)
+        #      local_network         = (batch_size, num_agents_max)
+        #      local_padding_flags   = (batch_size,)
+        #
+        #    We will create flattened shapes:
+        #      flat_agent_infos      = (batch_size * num_agents_max, num_agents_max, obs_dim)
+        #      flat_network          = (batch_size * num_agents_max, num_agents_max)
+        #      flat_local_pad_flags  = (batch_size * num_agents_max,)
+        #
+        #    And similarly replicate the global masks for neighbors, etc.
+        # ------------------------------------------------------------
+        # agent_infos: permute(1,0,2,3) => (i, b, neighbor, obs_dim),
+        # then reshape => (i*b, neighbor, obs_dim).
+        permuted_agent_infos = agent_infos.permute(1, 0, 2, 3)  # (num_agents_max, batch_size, num_agents_max, obs_dim)
+        flat_agent_infos = permuted_agent_infos.reshape(num_agents_max * batch_size, num_agents_max, obs_dim)
+
+        # network: permute(1,0,2) => (i, b, neighbor),
+        # then reshape => (i*b, neighbor).
+        permuted_network = network.permute(1, 0, 2)  # (num_agents_max, batch_size, num_agents_max)
+        flat_network = permuted_network.reshape(num_agents_max * batch_size, num_agents_max)
+
+        # padding_mask used for neighbors:
+        # Expand so each agent i sees the same "who is padded" info for neighbors.
+        # shape => (i, b, neighbor) => flatten => (i*b, neighbor).
+        expanded_padding_mask = padding_mask.unsqueeze(0).expand(num_agents_max, -1, -1)
+        flat_padding_mask_for_neighbors = expanded_padding_mask.reshape(num_agents_max * batch_size, num_agents_max)
+
+        # local_padding_flags = padding_mask[:, i], but we want the same flatten order (i,b).
+        # So permute(1,0) => (i, b) => flatten => (i*b).
+        permuted_local_padding = padding_mask.permute(1, 0)  # (num_agents_max, batch_size)
+        flat_local_padding_flags = permuted_local_padding.reshape(num_agents_max * batch_size)
+
+        # is_from_my_env: replicate for each agent i => (i, b) => flatten => (i*b).
+        expanded_is_from_my_env = is_from_my_env.unsqueeze(0).expand(num_agents_max, -1)  # (num_agents_max, batch_size)
+        flat_is_from_my_env = expanded_is_from_my_env.reshape(num_agents_max * batch_size)
+
+        # ------------------------------------------------------------
+        # 3) Call local_forward once on the flattened data
+        #
+        #    local_forward signature (in your original loop) was:
+        #       local_forward(
+        #           local_agent_info, local_network, padding_mask, is_from_my_env, local_padding_flags
+        #       )
+        #
+        #    So now we pass the flattened arguments:
+        # ------------------------------------------------------------
+        sub_att_scores_flat, _, h_c_N_flat = self.local_forward(
+            flat_agent_infos,  # (batch_size * num_agents_max, num_agents_max, obs_dim)
+            flat_network,  # (batch_size * num_agents_max, num_agents_max)
+            flat_padding_mask_for_neighbors,  # (batch_size * num_agents_max, num_agents_max)
+            flat_is_from_my_env,  # (batch_size * num_agents_max,)
+            flat_local_padding_flags  # (batch_size * num_agents_max,)
+        )
+        # sub_att_scores_flat => (batch_size * num_agents_max, num_agents_max)
+        # h_c_N_flat         => (batch_size * num_agents_max, 1, d_embed_context)
+
+        # ------------------------------------------------------------
+        # 4) Reshape back to the original (batch_size, num_agents_max, num_agents_max)
+        #    ordering so that it matches the loop-based version exactly.
+        # ------------------------------------------------------------
+        # sub_att_scores_flat => (i*b, neighbor).  Reshape => (i, b, neighbor). Then
+        # permute => (b, i, neighbor).
+        sub_att_scores_reshaped = sub_att_scores_flat.view(num_agents_max, batch_size, num_agents_max)
+        att_scores = sub_att_scores_reshaped.permute(1, 0, 2)  # => (batch_size, num_agents_max, num_agents_max)
+
+        # ------------------------------------------------------------
+        # 5) Sum up h_c_N across all i (like h_c_N_accumulator += h_c_N in the og loop).
+        #    Then average across the (non-padded) agents at the end.
+        # ------------------------------------------------------------
+        # h_c_N_flat => (i*b, 1, d_embed_context).  Reshape => (i, b, 1, d_embed_context).
+        # Then sum across the i dimension => (b, 1, d_embed_context).
+        _, _, d_embed_context = h_c_N_flat.shape
+        h_c_N_reshaped = h_c_N_flat.view(num_agents_max, batch_size, 1, d_embed_context)
+        h_c_N_accumulator = h_c_N_reshaped.sum(dim=0)  # => (batch_size, 1, d_embed_context)
+
+        # Now average across the actual number of agents (not counting padding).
+        num_agents_per_sample = num_agents_per_sample.view(-1, 1, 1).float()  # (batch_size, 1, 1)
+        average_h_c_N = h_c_N_accumulator / num_agents_per_sample  # (batch_size, 1, d_embed_context)
+
+        # ------------------------------------------------------------
+        # 6) Return results
+        # ------------------------------------------------------------
+        # att_scores: (batch_size, num_agents_max, num_agents_max)
+        # average_h_c_N: (batch_size, 1, d_embed_context)
+        return att_scores, average_h_c_N
+
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
 
     def decode(self, tgt, encoder_out, tgt_mask, src_tgt_mask):
         return self.decoder(tgt, encoder_out, tgt_mask, src_tgt_mask)
 
-    def local_forward(
+    def local_forward_og(
             self,
             local_agent_info,
             local_network,
@@ -127,7 +234,7 @@ class LazyVicsekListener(nn.Module):
         # h_c_N: (batch_size, 1, d_embed_context)
         return sub_att_scores, decoder_out, h_c_N
 
-    def local_forward_2(
+    def local_forward(
             self,
             local_agent_info,
             local_network,
@@ -140,7 +247,7 @@ class LazyVicsekListener(nn.Module):
         :param local_network:    (batch_size, num_agents_max)
         :param padding_mask:     (batch_size, num_agents_max)
         :param is_from_my_env:   (batch_size,)
-        :param local_padding_flags: (batch_size,)
+        :param local_padding_flags: (batch_size,)  # Checks if the agent of each batch is padded or not in local_forward
         :return: sub_att_scores: (batch_size, num_agents_max)
         """
         batch_size, num_agents_max, obs_dim = local_agent_info.shape
@@ -193,6 +300,9 @@ class LazyVicsekListener(nn.Module):
             decoder_out[non_padded_mask] = decoder_out_np
             h_c_N[non_padded_mask] = h_c_N_np
             sub_att_scores[non_padded_mask] = sub_att_scores_np
+        else:
+            print("WARNING All samples are padded in the batch. If this is not expected such as "
+                  "parallelized forward, check the padding mask.")
 
         return sub_att_scores, decoder_out, h_c_N
 
