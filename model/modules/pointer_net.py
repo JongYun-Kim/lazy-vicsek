@@ -57,6 +57,6 @@ class RawAttentionScoreGeneratorPlaceholder(nn.Module):
         seq_len_key = input_key.size(1)
 
         # Create a tensor of zeros with the same shape as the original output
-        out = torch.zeros(batch_size, seq_len_query, seq_len_key)
+        out = torch.zeros(batch_size, seq_len_query, seq_len_key, device=input_query.device)
 
         return out

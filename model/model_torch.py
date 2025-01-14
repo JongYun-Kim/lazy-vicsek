@@ -193,11 +193,8 @@ class LazyVicsekListener(nn.Module):
             decoder_out_np = self.decode(h_c_N_np, encoder_out, tgt_mask, src_tgt_mask.unsqueeze(1))
 
             # Generator
-            sub_att_scores_np = self.generator(
-                input_query=decoder_out_np,
-                input_key=encoder_out,
-                mask=src_tgt_mask
-            ).squeeze(1)  # (n_non_padded, num_agents_max)
+            sub_att_scores_np = self.generator(input_query=decoder_out_np, input_key=encoder_out,
+                                               mask=src_tgt_mask).squeeze(1)  # (n_non_padded, num_agents_max)
 
             # Update results for non-padded sequences
             decoder_out[non_padded_mask] = decoder_out_np
@@ -205,7 +202,7 @@ class LazyVicsekListener(nn.Module):
             sub_att_scores[non_padded_mask] = sub_att_scores_np
         else:
             print("WARNING All samples are padded in the batch. If this is not expected such as "
-                  "parallelized forward, check the padding mask.")
+                  "parallelized forward, check the padding mask.")  # TODO: Also need to check env_check mode
 
         return sub_att_scores, decoder_out, h_c_N
 
@@ -294,14 +291,16 @@ class LazyVicsekListener(nn.Module):
 
         batch_size, num_agents_max, _, obs_dim = agent_infos.shape
 
-        # TODO: Currently, padding agents are not *fully* supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
+        """
+        In forward_og, padding agents are not *fully* supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
+        """
 
         # Get sub-attention scores
         att_scores = torch.zeros_like(network, dtype=torch.float32)  # (batch_size, num_agents_max, num_agents_max)
         num_agents = padding_mask.sum(dim=1).int()  # (batch_size,); number of agents in each sample
         h_c_N_accumulator = torch.zeros(batch_size, 1, self.d_embed_context, device=agent_infos.device)
 
-        for i in range(num_agents_max):  # TODO: [MUST] push agent dim onto batch dim to parallelize
+        for i in range(num_agents_max):  # In the latest ver, pushed agent dim onto batch dim to parallelize
             local_agent_info = agent_infos[:, i, :, :]
             local_network = network[:, i, :]
             local_padding_flags = padding_mask[:, i]
@@ -314,7 +313,7 @@ class LazyVicsekListener(nn.Module):
             att_scores[:, i, :] = sub_att_scores
 
             # Accumulate h_c_N values
-            h_c_N_accumulator += h_c_N  # TODO: 패딩 에이전트는 더해지면 안됨!! 마스크 곱해서 더해야 할 듯 (아직 구현 안됨)
+            h_c_N_accumulator += h_c_N  # In latest, 패딩 에이전트 안 더해짐.
 
         # Calculate average_h_c_N
         num_agents = num_agents.view(-1, 1, 1).float()  # (batch_size, 1, 1)
