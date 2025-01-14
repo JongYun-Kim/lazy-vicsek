@@ -24,46 +24,6 @@ class LazyVicsekListener(nn.Module):
         # Custom layers, if needed
         #
 
-    def forward_og(self, obs_dict: Dict[str, TensorType]):
-        # Get data
-        agent_infos = obs_dict["local_agent_infos"]  # (batch_size, num_agents_max, num_agents_max, obs_dim)
-        network = obs_dict["neighbor_masks"]  # (batch_size, num_agents_max, num_agents_max); (:,i,:): i-th agent's net
-        padding_mask = obs_dict["padding_mask"]  # (batch_size, num_agents_max); applies over all agents same
-        is_from_my_env = obs_dict["is_from_my_env"]  # (batch_size,); 1: from my env, 0: under the env_check
-        # Caution: masks are torch FLOAT tensors, not boolean tensors, which I don't like in RLlib (v2.1.0)
-
-        batch_size, num_agents_max, _, obs_dim = agent_infos.shape
-
-        # TODO: Currently, padding agents are not *fully* supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
-
-        # Get sub-attention scores
-        att_scores = torch.zeros_like(network, dtype=torch.float32)  # (batch_size, num_agents_max, num_agents_max)
-        num_agents = padding_mask.sum(dim=1).int()  # (batch_size,); number of agents in each sample
-        h_c_N_accumulator = torch.zeros(batch_size, 1, self.d_embed_context, device=agent_infos.device)
-
-        for i in range(num_agents_max):  # TODO: [MUST] push agent dim onto batch dim to parallelize
-            local_agent_info = agent_infos[:, i, :, :]
-            local_network = network[:, i, :]
-            local_padding_flags = padding_mask[:, i]
-
-            # sub_att_scores: shape: (batch_size, num_agents_max)
-            # h_c_N: shape: (batch_size, 1, d_embed_context)
-            sub_att_scores, _, h_c_N = self.local_forward_og(local_agent_info, local_network, padding_mask, is_from_my_env, local_padding_flags)
-
-            # Get the i-th row of the attention scores
-            att_scores[:, i, :] = sub_att_scores
-
-            # Accumulate h_c_N values
-            h_c_N_accumulator += h_c_N  # TODO: 패딩 에이전트는 더해지면 안됨!! 마스크 곱해서 더해야 할 듯 (아직 구현 안됨)
-
-        # Calculate average_h_c_N
-        num_agents = num_agents.view(-1, 1, 1).float()  # (batch_size, 1, 1)
-        average_h_c_N = h_c_N_accumulator / num_agents
-
-        # att_scores: (batch_size, num_agents_max, num_agents_max)
-        # average_h_c_N: (batch_size, 1, d_embed_context)
-        return att_scores, average_h_c_N
-
     def forward(self, obs_dict: Dict[str, torch.Tensor]):
         """
         Vectorized version of the forward pass that produces
@@ -176,63 +136,6 @@ class LazyVicsekListener(nn.Module):
 
     def decode(self, tgt, encoder_out, tgt_mask, src_tgt_mask):
         return self.decoder(tgt, encoder_out, tgt_mask, src_tgt_mask)
-
-    def local_forward_og(
-            self,
-            local_agent_info,
-            local_network,
-            padding_mask,
-            is_from_my_env,
-            local_padding_flags,
-    ):
-        """
-        :param local_agent_info: (batch_size, num_agents_max, obs_dim)
-        :param local_network:    (batch_size, num_agents_max)
-        :param padding_mask:     (batch_size, num_agents_max)
-        :param is_from_my_env:   (batch_size,)
-        :param local_padding_flags: (batch_size,)
-        :return: sub_att_scores: (batch_size, num_agents_max)
-        """
-
-        # Get data
-        src = local_agent_info  # (batch_size, num_agents_max, d_v)
-
-        # Get masks
-        # local_network:
-        # # 0: padding / disconnected, 1: connected
-        # # 0: no attention,           1: attention
-        # # 0: False in mask,          1: True in mask
-        src_mask_tokens = local_network.ne(0)  # (batch_size, num_agents_max==seq_len_src)  bool tensor
-        src_mask_idx = 0
-        src_mask = self.make_src_mask(src_mask_tokens, mask_idx=src_mask_idx)  # (batch_size, seq_len_src, seq_len_src)
-        tgt_mask = None  # No (masked) self-attention layer in the decoder block
-        context_mask_token = torch.ones_like(src_mask_tokens[:, 0:1], dtype=torch.bool)  # (batch_size, 1); it's 2D
-        # In the Cross-Attention, Q=tgt=context, K/V=src=enc_out
-        src_tgt_mask = self.make_src_tgt_mask(src_mask_tokens, context_mask_token, mask_idx=src_mask_idx)
-
-        # Embedding: in the encoder method
-
-        # Encoder
-        # encoder_out: shape: (batch_size, src_seq_len, d_embed) == (batch_size, num_agents_max, d_embed)
-        # unsqueeze(1) has been applied to src_mask to broadcast over head dim in the MHA layer
-        encoder_out = self.encode(src, src_mask.unsqueeze(1))
-
-        # Context embedding, if needed
-        h_c_N = self.get_context_vector(embeddings=encoder_out, pad_tokens=~src_mask_tokens,
-                                        is_from_my_env=is_from_my_env,
-                                        use_embeddings_mask=True, debug=True)  # (batch_size, 1, d_embed_context)
-
-        # Decoder: Cross-Attention (glimpse); Q: context, K/V: encoder_out
-        # decoder_out: shape: (batch_size, 1, d_embed_context)
-        decoder_out = self.decode(h_c_N, encoder_out, tgt_mask, src_tgt_mask.unsqueeze(1))  # h_c_(N+1)
-
-        # Generator: raw attention scores by CA; Q: rich-context (decoder_out), K/V: encoder_out
-        sub_att_scores = self.generator(input_query=decoder_out, input_key=encoder_out, mask=src_tgt_mask).squeeze(1)  # kill q dim
-
-        # sub_att_scores: (batch_size, num_agents_max)
-        # decoder_out: (batch_size, 1, d_embed_context)
-        # h_c_N: (batch_size, 1, d_embed_context)
-        return sub_att_scores, decoder_out, h_c_N
 
     def local_forward(
             self,
@@ -380,3 +283,100 @@ class LazyVicsekListener(nn.Module):
         mask = key_mask & query_mask
         mask.requires_grad = False
         return mask  # output shape: (n_batch, query_seq_len, key_seq_len)  # Keep in mind: 'NO HEADING DIM' here!!
+
+    def forward_og(self, obs_dict: Dict[str, TensorType]):
+        # Get data
+        agent_infos = obs_dict["local_agent_infos"]  # (batch_size, num_agents_max, num_agents_max, obs_dim)
+        network = obs_dict["neighbor_masks"]  # (batch_size, num_agents_max, num_agents_max); (:,i,:): i-th agent's net
+        padding_mask = obs_dict["padding_mask"]  # (batch_size, num_agents_max); applies over all agents same
+        is_from_my_env = obs_dict["is_from_my_env"]  # (batch_size,); 1: from my env, 0: under the env_check
+        # Caution: masks are torch FLOAT tensors, not boolean tensors, which I don't like in RLlib (v2.1.0)
+
+        batch_size, num_agents_max, _, obs_dim = agent_infos.shape
+
+        # TODO: Currently, padding agents are not *fully* supported in the model (network: src_maskS, pad_mask: tgt_mask ?)
+
+        # Get sub-attention scores
+        att_scores = torch.zeros_like(network, dtype=torch.float32)  # (batch_size, num_agents_max, num_agents_max)
+        num_agents = padding_mask.sum(dim=1).int()  # (batch_size,); number of agents in each sample
+        h_c_N_accumulator = torch.zeros(batch_size, 1, self.d_embed_context, device=agent_infos.device)
+
+        for i in range(num_agents_max):  # TODO: [MUST] push agent dim onto batch dim to parallelize
+            local_agent_info = agent_infos[:, i, :, :]
+            local_network = network[:, i, :]
+            local_padding_flags = padding_mask[:, i]
+
+            # sub_att_scores: shape: (batch_size, num_agents_max)
+            # h_c_N: shape: (batch_size, 1, d_embed_context)
+            sub_att_scores, _, h_c_N = self.local_forward_og(local_agent_info, local_network, padding_mask, is_from_my_env, local_padding_flags)
+
+            # Get the i-th row of the attention scores
+            att_scores[:, i, :] = sub_att_scores
+
+            # Accumulate h_c_N values
+            h_c_N_accumulator += h_c_N  # TODO: 패딩 에이전트는 더해지면 안됨!! 마스크 곱해서 더해야 할 듯 (아직 구현 안됨)
+
+        # Calculate average_h_c_N
+        num_agents = num_agents.view(-1, 1, 1).float()  # (batch_size, 1, 1)
+        average_h_c_N = h_c_N_accumulator / num_agents
+
+        # att_scores: (batch_size, num_agents_max, num_agents_max)
+        # average_h_c_N: (batch_size, 1, d_embed_context)
+        return att_scores, average_h_c_N
+
+    def local_forward_og(
+            self,
+            local_agent_info,
+            local_network,
+            padding_mask,
+            is_from_my_env,
+            local_padding_flags,
+    ):
+        """
+        :param local_agent_info: (batch_size, num_agents_max, obs_dim)
+        :param local_network:    (batch_size, num_agents_max)
+        :param padding_mask:     (batch_size, num_agents_max)
+        :param is_from_my_env:   (batch_size,)
+        :param local_padding_flags: (batch_size,)
+        :return: sub_att_scores: (batch_size, num_agents_max)
+        """
+
+        # Get data
+        src = local_agent_info  # (batch_size, num_agents_max, d_v)
+
+        # Get masks
+        # local_network:
+        # # 0: padding / disconnected, 1: connected
+        # # 0: no attention,           1: attention
+        # # 0: False in mask,          1: True in mask
+        src_mask_tokens = local_network.ne(0)  # (batch_size, num_agents_max==seq_len_src)  bool tensor
+        src_mask_idx = 0
+        src_mask = self.make_src_mask(src_mask_tokens, mask_idx=src_mask_idx)  # (batch_size, seq_len_src, seq_len_src)
+        tgt_mask = None  # No (masked) self-attention layer in the decoder block
+        context_mask_token = torch.ones_like(src_mask_tokens[:, 0:1], dtype=torch.bool)  # (batch_size, 1); it's 2D
+        # In the Cross-Attention, Q=tgt=context, K/V=src=enc_out
+        src_tgt_mask = self.make_src_tgt_mask(src_mask_tokens, context_mask_token, mask_idx=src_mask_idx)
+
+        # Embedding: in the encoder method
+
+        # Encoder
+        # encoder_out: shape: (batch_size, src_seq_len, d_embed) == (batch_size, num_agents_max, d_embed)
+        # unsqueeze(1) has been applied to src_mask to broadcast over head dim in the MHA layer
+        encoder_out = self.encode(src, src_mask.unsqueeze(1))
+
+        # Context embedding, if needed
+        h_c_N = self.get_context_vector(embeddings=encoder_out, pad_tokens=~src_mask_tokens,
+                                        is_from_my_env=is_from_my_env,
+                                        use_embeddings_mask=True, debug=True)  # (batch_size, 1, d_embed_context)
+
+        # Decoder: Cross-Attention (glimpse); Q: context, K/V: encoder_out
+        # decoder_out: shape: (batch_size, 1, d_embed_context)
+        decoder_out = self.decode(h_c_N, encoder_out, tgt_mask, src_tgt_mask.unsqueeze(1))  # h_c_(N+1)
+
+        # Generator: raw attention scores by CA; Q: rich-context (decoder_out), K/V: encoder_out
+        sub_att_scores = self.generator(input_query=decoder_out, input_key=encoder_out, mask=src_tgt_mask).squeeze(1)  # kill q dim
+
+        # sub_att_scores: (batch_size, num_agents_max)
+        # decoder_out: (batch_size, 1, d_embed_context)
+        # h_c_N: (batch_size, 1, d_embed_context)
+        return sub_att_scores, decoder_out, h_c_N
